@@ -1,0 +1,69 @@
+# Documentation index
+
+## Start here
+
+| Audience | File |
+|---|---|
+| Human setup | [PRE-REQUISITES.md](PRE-REQUISITES.md) |
+| Orchestrator | [swarm/ORCHESTRATOR.md](swarm/ORCHESTRATOR.md) |
+| **All agents** | **[AGENT-PRD.md](AGENT-PRD.md)** |
+| Subagents | [swarm/RULES.md](swarm/RULES.md) + [swarm/workstreams/](swarm/workstreams/) |
+
+## Architecture
+
+- [architecture/overview.md](architecture/overview.md)
+- [architecture/target-architecture.md](architecture/target-architecture.md)
+- [architecture/reference-repos.md](architecture/reference-repos.md)
+- [architecture/ingress.md](architecture/ingress.md)
+- [architecture/istio.md](architecture/istio.md)
+- [architecture/identity.md](architecture/identity.md)
+
+## Swarm operations
+
+- [decisions-locked.md](decisions-locked.md)
+- [swarm/GATES.md](swarm/GATES.md)
+- [swarm/PARALLELISM.md](swarm/PARALLELISM.md)
+- [swarm/STATE-KEYS.md](swarm/STATE-KEYS.md)
+- [swarm/CONNECTIVITY.md](swarm/CONNECTIVITY.md)
+- [PRE-REQUISITES.md](PRE-REQUISITES.md)
+- [swarm/CREDENTIALS.md](swarm/CREDENTIALS.md)
+- [swarm/PHASE-1-SUCCESS.md](swarm/PHASE-1-SUCCESS.md)
+- [swarm/MODELS.md](swarm/MODELS.md)
+
+## Workstreams (WS-00 … WS-13)
+
+| WS | File | Phase | Model / Effort |
+|---|---|---|---|
+| 00 | [WS-00-scaffold.md](swarm/workstreams/WS-00-scaffold.md) | 0 | Sonnet / high |
+| 01 | [WS-01-bootstrap.md](swarm/workstreams/WS-01-bootstrap.md) | 1 | Sonnet / high |
+| 02 | [WS-02-network.md](swarm/workstreams/WS-02-network.md) | 1 | Sonnet / high |
+| 03 | [WS-03-data.md](swarm/workstreams/WS-03-data.md) | 1 | Sonnet / high |
+| 04 | [WS-04-eks.md](swarm/workstreams/WS-04-eks.md) | 1 | **Opus 4.8 / xhigh** |
+| 05 | [WS-05-coder.md](swarm/workstreams/WS-05-coder.md) | 1 | **Opus 4.8 / xhigh** |
+| 06 | [WS-06-keycloak.md](swarm/workstreams/WS-06-keycloak.md) | 1 | Sonnet / high |
+| 07 | [WS-07-eks-day2.md](swarm/workstreams/WS-07-eks-day2.md) | 1 | **Opus 4.8 / xhigh** |
+| 08 | [WS-08-templates-eks.md](swarm/workstreams/WS-08-templates-eks.md) | 1 | Sonnet / high |
+| 09 | [WS-09-istio.md](swarm/workstreams/WS-09-istio.md) | 2 | **Opus 4.8 / xhigh** |
+| 10 | [WS-10-gitlab.md](swarm/workstreams/WS-10-gitlab.md) | 2 | Sonnet / high |
+| 11 | [WS-11-ocp.md](swarm/workstreams/WS-11-ocp.md) | 3 | Opus/Sonnet† |
+| 12 | [WS-12-identity.md](swarm/workstreams/WS-12-identity.md) | 2 | Sonnet / high |
+| 13 | [WS-13-bedrock.md](swarm/workstreams/WS-13-bedrock.md) | 4 | Sonnet / high |
+
+† WS-11 sub-streams: see [MODELS.md](swarm/MODELS.md) for model + effort per SA
+
+## Runtime artifacts (created by agents)
+
+- [swarm/handoffs/](swarm/handoffs/) — per-WS outputs
+- [swarm/SWARM-STATUS.md](swarm/SWARM-STATUS.md) — orchestrator dashboard
+
+## Templates
+
+- [templates/handoff-template.md](templates/handoff-template.md)
+- [templates/swarm-status-template.md](templates/swarm-status-template.md)
+
+## Other
+
+- [repo-layout.md](repo-layout.md)
+- [risks.md](risks.md)
+- [out-of-scope.md](out-of-scope.md)
+- [runbooks/](runbooks/)
