@@ -165,6 +165,13 @@ gated; Nova Pro is the proven fallback.
       render live data at `https://grafana.usgov.coderdemo.io` (valid TLS,
       HTTP 200). Grafana admin password lives in AWS Secrets Manager
       (`usgov-coderdemo/observability/grafana`) and is synced by ESO.
+- [x] **Grafana Keycloak SSO (one SSO)**: Grafana signs in via the same realm
+      (`coder`) through a confidential OIDC client `grafana`
+      (`scripts/setup-grafana-oidc.py`, PKCE; secret in ASM
+      `usgov-coderdemo/observability/grafana-oauth`, ESO-synced). Group
+      membership maps to org role: `/platform` -> Grafana `Admin`, others ->
+      `Viewer`; local admin kept as break-glass. Verified per persona
+      (`pat.platform` Admin, `dana.dev` Viewer).
 - [x] **Structured JSON server logs** (`CODER_LOGGING_JSON=/dev/stderr`,
       `CODER_LOGGING_HUMAN=/dev/null`) make coderd SIEM-ready; audit logging is
       entitled + on (`/audit`).

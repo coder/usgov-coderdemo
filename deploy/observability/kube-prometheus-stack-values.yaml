@@ -120,11 +120,20 @@ grafana:
     repository: docker-hub/grafana/grafana
     tag: 13.0.1-security-01
   # Admin credentials from the ESO-synced Secret `grafana-admin` (sourced from
-  # AWS Secrets Manager usgov-coderdemo/observability/grafana).
+  # AWS Secrets Manager usgov-coderdemo/observability/grafana). The local admin
+  # login is kept as break-glass alongside Keycloak SSO below.
   admin:
     existingSecret: grafana-admin
     userKey: admin-user
     passwordKey: admin-password
+  # Keycloak OIDC client secret (ESO-synced from
+  # usgov-coderdemo/observability/grafana-oauth) injected as the env var that
+  # overrides [auth.generic_oauth] client_secret, so no secret sits in git.
+  envValueFrom:
+    GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET:
+      secretKeyRef:
+        name: grafana-oauth
+        key: client-secret
   # The bundled Kubernetes dashboards need kube-state-metrics, which is off.
   defaultDashboardsEnabled: false
   service:
@@ -137,6 +146,35 @@ grafana:
   "grafana.ini":
     server:
       root_url: https://grafana.usgov.coderdemo.io
+    # Single sign-on via the same Keycloak realm (`coder`) as the rest of the
+    # stack. The confidential client `grafana` is created by
+    # scripts/setup-grafana-oidc.py; the secret is injected via the env var
+    # above. The local admin login form is left enabled as break-glass.
+    auth:
+      oauth_auto_login: false
+      disable_login_form: false
+    "auth.generic_oauth":
+      enabled: true
+      name: Keycloak
+      icon: signin
+      client_id: grafana
+      # client_secret comes from GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET (env).
+      scopes: "openid email profile"
+      auth_url: https://auth.usgov.coderdemo.io/realms/coder/protocol/openid-connect/auth
+      token_url: https://auth.usgov.coderdemo.io/realms/coder/protocol/openid-connect/token
+      api_url: https://auth.usgov.coderdemo.io/realms/coder/protocol/openid-connect/userinfo
+      login_attribute_path: preferred_username
+      email_attribute_path: email
+      name_attribute_path: name
+      use_pkce: true
+      allow_sign_up: true
+      # Map Keycloak group membership to a Grafana org role. Platform
+      # Engineering (group path /platform) administers Grafana; every other
+      # authenticated realm user gets read-only Viewer.
+      role_attribute_path: "contains(groups[*], '/platform') && 'Admin' || 'Viewer'"
+      role_attribute_strict: false
+      # Org role only; the Grafana server-admin flag stays with the local admin.
+      allow_assign_grafana_admin: false
   sidecar:
     image:
       registry: 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com

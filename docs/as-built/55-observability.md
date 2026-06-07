@@ -4,8 +4,10 @@ In-boundary, in-cluster metrics and dashboards for the GovCloud demo: the
 `prometheus-community/kube-prometheus-stack` Helm release `kps` (Prometheus +
 Grafana + the Prometheus operator) in the `monitoring` namespace, scraping the
 Coder control plane's Prometheus metrics and rendering Coder's prebuilt Grafana
-dashboards with live data at `https://grafana.usgov.coderdemo.io`. Coder audit
-logging is entitled and on; structured JSON server logs make it SIEM-ready.
+dashboards with live data at `https://grafana.usgov.coderdemo.io`. Grafana signs
+in through the same Keycloak realm (`coder`) as the rest of the stack, so the
+demo is one SSO. Coder audit logging is entitled and on; structured JSON server
+logs make it SIEM-ready.
 
 This is the reliable in-cluster implementation. The AWS-native managed variant
 (Amazon Managed Prometheus / Grafana, Security Lake) is planned separately and
@@ -119,6 +121,41 @@ has series (cAdvisor).
   no data, because this stack ships metrics only (no Loki). Their Prometheus
   panels render live.
 
+### Single sign-on (Keycloak OIDC)
+
+Grafana logs in through the same Keycloak realm (`coder`) as Coder, so the demo
+is one SSO. A confidential OIDC client `grafana` is registered in the realm by
+`scripts/setup-grafana-oidc.py` (idempotent): standard authorization-code flow
+with PKCE (S256), redirect URI
+`https://grafana.usgov.coderdemo.io/login/generic_oauth`, and the same full-path
+`groups` group-membership mapper the `coder` client uses. The script reads the
+client secret and stores it in AWS Secrets Manager at
+`usgov-coderdemo/observability/grafana-oauth` (`{"client-secret"}`); ESO syncs it
+into the Kubernetes Secret `grafana-oauth`, and Grafana consumes it through the
+env var `GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET` (set via `grafana.envValueFrom`),
+so no secret is in git.
+
+Grafana's `[auth.generic_oauth]` (in `kube-prometheus-stack-values.yaml`) points
+at the realm's auth/token/userinfo endpoints with scopes `openid email profile`
+and maps Keycloak group membership to a Grafana org role:
+
+```
+role_attribute_path: contains(groups[*], '/platform') && 'Admin' || 'Viewer'
+```
+
+so Platform Engineering (group path `/platform`) administers Grafana and every
+other authenticated realm user gets read-only `Viewer`. `allow_sign_up: true`
+auto-provisions users on first login; `allow_assign_grafana_admin: false` keeps
+the Grafana server-admin flag with the local account. The local admin login form
+is intentionally left enabled (`disable_login_form: false`) as break-glass.
+
+Verified live with a headless authorization-code login per persona: the login
+page shows "Sign in with Keycloak"; `/login/generic_oauth` redirects to the realm
+with `client_id=grafana` and PKCE; `pat.platform` (`/platform`) lands as org
+role `Admin` (the admin-only `/api/org/users` returns 200) while `dana.dev`
+(`/alpha`) lands as `Viewer` (same endpoint returns 403). Both arrive
+`authLabels: ["Generic OAuth"]`, `isExternallySynced: true`.
+
 ### Admin credentials (ESO + AWS Secrets Manager)
 
 The admin password is generated once and stored as JSON
@@ -164,8 +201,11 @@ forever).
 ## Reaching Grafana
 
 - URL: `https://grafana.usgov.coderdemo.io` (valid TLS via the ACM wildcard).
-- User: `admin`. Password: the value synced into the `grafana-admin` Secret from
-  ASM `usgov-coderdemo/observability/grafana`
+- SSO (preferred): click **Sign in with Keycloak** and authenticate against the
+  `coder` realm. Platform Engineering personas get Grafana `Admin`; other realm
+  users get `Viewer`. See "Single sign-on (Keycloak OIDC)".
+- Break-glass: user `admin`, password the value synced into the `grafana-admin`
+  Secret from ASM `usgov-coderdemo/observability/grafana`
   (`kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d`).
 - Open the "Coder Control Plane" dashboard for live control-plane metrics.
 
