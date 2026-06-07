@@ -1,0 +1,14 @@
+# Image mirror list for usgov-coderdemo (ECR has no pull-through in GovCloud).
+# One fully-qualified upstream image reference per line. Comments and blanks ignored.
+# Pin tags (or digests) explicitly. Avoid :latest for reproducibility.
+#
+# Mapping to ECR (handled by mirror-images.sh):
+#   docker.io/library/nginx:1.27      -> <ecr>/docker-hub/library/nginx:1.27
+#   docker.io/bitnami/postgresql:16   -> <ecr>/docker-hub/bitnami/postgresql:16
+#   ghcr.io/org/app:v1.2.3            -> <ecr>/ghcr/org/app:v1.2.3
+#   quay.io/keycloak/keycloak:26.0    -> <ecr>/quay/keycloak/keycloak:26.0
+#
+# Populate with the images each workstream actually needs. Examples (commented):
+# docker.io/library/nginx:1.27
+# quay.io/keycloak/keycloak:26.0
+# quay.io/jetstack/cert-manager-controller:v1.16.2

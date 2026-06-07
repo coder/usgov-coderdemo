@@ -1,0 +1,34 @@
+# Pinned versions and locked facts for the usgov-coderdemo demo.
+# Single source of truth. Read this; do not hardcode elsewhere.
+
+region: us-gov-west-1
+partition: aws-us-gov
+domain: usgov.coderdemo.io
+ingress_mode: direct        # NLB + ACM direct to Coder. No Istio.
+
+coder:
+  version: "2.34.0"         # latest stable
+  helm_chart: "2.34.0"
+
+kubernetes: "1.36"          # latest EKS-supported in us-gov-west-1
+terraform: "1.15.5"
+postgres: "18.4"            # latest RDS PG in us-gov-west-1
+keycloak: "26.6.3"
+gitlab_ce: "19.0.1"
+
+backend:
+  s3_bucket: "usgov-coderdemo-tfstate-430737322961"
+  dynamodb_table: "usgov-coderdemo-tflock"
+
+# Discovered account facts (us-gov-west-1, account 430737322961)
+acm_certificate_arn: "arn:aws-us-gov:acm:us-gov-west-1:430737322961:certificate/7f4fc566-8efd-4aa5-b6ba-3b0c9a535d12"
+route53_zone_id: "Z06701704WFETYIRU5C8"
+
+# AI
+bedrock_inference_profile: "us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0"
+
+hosts:
+  coder:    dev.usgov.coderdemo.io
+  apps:     "*.usgov.coderdemo.io"   # Coder wildcard access URL (single level, matches cert)
+  keycloak: auth.usgov.coderdemo.io
+  gitlab:   gitlab.usgov.coderdemo.io

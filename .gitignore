@@ -1,0 +1,16 @@
+# Secrets / state - never commit
+.env
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.tfstate.lock.info
+# Saved plans can embed sensitive values (e.g. generated DB passwords).
+tfplan.bin
+*.tfplan
+crash.log
+kubeconfig
+*.kubeconfig
+secrets/
+*.pem
+*.key
+*.tfvars.local
