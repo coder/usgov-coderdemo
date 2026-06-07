@@ -1,0 +1,29 @@
+# Plans (design proposals)
+
+Forward-looking design documents for the GovCloud Coder demo. These are
+**proposals for LATER adoption**: nothing in this directory has been applied to
+the live cluster, AWS, Coder, Keycloak, or GitLab. Each plan has companion
+GitHub issues that track the implementation work.
+
+The engineering record of what is actually deployed lives in
+[`../as-built/`](../as-built/README.md); this directory describes where parts of
+that deployment are intended to evolve.
+
+| Plan | Scope | Issues |
+|---|---|---|
+| [observability-aws-native.md](observability-aws-native.md) | The production, AWS-native observability + audit target the in-cluster Prometheus/Grafana stack should evolve into: Amazon Managed Prometheus + Grafana for metrics, and CloudWatch -> Firehose -> S3 -> Athena with an optional Amazon Security Lake (OCSF) path for audit/SIEM. | #13-#20 |
+| [gitops-control-plane.md](gitops-control-plane.md) | The GitOps control plane and bootstrap: Argo CD installed in-cluster, sourcing from the in-cluster GitLab, with an app-of-apps over the existing `deploy/` paths and a non-disruptive adopt-in-place strategy. | #6-#12 |
+| [gitops-adoption.md](gitops-adoption.md) | Per-workload GitOps adoption details and the application state a GitOps controller cannot natively reconcile (Coder API config via Argo Jobs, Keycloak realm via keycloak-config-cli, AWS substrate stays Terraform). | #21-#29 |
+
+## Relationship between the plans
+
+- The two GitOps plans are siblings: **gitops-control-plane** decides and
+  bootstraps the controller (the "where it syncs from" and "how it is
+  installed"), while **gitops-adoption** designs, per workload, how each live
+  resource is adopted without disruption. They deliberately do not duplicate
+  each other.
+- **observability-aws-native** is independent of GitOps: it is the managed-AWS
+  target for the observability stack documented as-built in
+  [`../as-built/55-observability.md`](../as-built/55-observability.md). Its
+  Phase 0 (enable Coder Prometheus metrics + JSON audit logging) is already done
+  by the in-cluster build; the remaining phases are the AWS-native migration.
