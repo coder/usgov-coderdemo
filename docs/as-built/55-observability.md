@@ -261,6 +261,41 @@ HTTP 200; the three `up` panels and Postgres each evaluate to `1`, and Workspace
 Builds returns `1` for `status="succeeded"`. The header comment in
 `dashboards-coder.yaml` documents this adaptation.
 
+## AI Governance dashboard
+
+`deploy/observability/dashboards-ai-governance.yaml` adds one merged dashboard
+(ConfigMap `coder-dashboard-ai-governance`, ns `monitoring`, label
+`grafana_dashboard: "1"`, uid `ai-governance`, title "AI Governance") for the
+Coder AI Governance add-on. It replaces the two separate add-on dashboards with a
+single view that covers both halves of the feature, and it lives in its own file
+so it never conflicts with `dashboards-coder.yaml`. Every panel targets datasource
+uid `prometheus` or uid `loki`.
+
+The "AI Gateway (AI Bridge)" row reads the `coder_aibridged_*` Prometheus series:
+a Configured Providers stat (`count(coder_aibridged_provider_info)`, value `2`),
+a Provider Reload Status stat
+(`coder_aibridged_providers_last_reload_timestamp_seconds == bool` the success
+variant, value `1` = Healthy), a Last Successful Reload stat
+(`coder_aibridged_providers_last_reload_success_timestamp_seconds`), and a
+Provider Inventory table (provider name, type, status). A logs panel streams
+`{namespace="coder"} |~ "aibridged"` from Loki, with a companion log event rate
+timeseries (`count_over_time` over 5m).
+
+The "Agent Firewall (Boundary)" row reads
+`agent_boundary_log_proxy_batches_forwarded_total`: a total forwarded batches
+stat, a per workspace forwarded rate timeseries
+(`sum by (workspace_name, username) (rate(...[5m]))`), and an Active Boundary
+Agents table (workspace, user, template, agent). A logs panel streams
+`{namespace="coder-workspaces"} |= "boundary"` from Loki.
+
+AI Bridge exposes no token, request, or latency Prometheus metrics, and the live
+Anthropic key is a placeholder, so AI and agent traffic is minimal. Usage panels
+(Total Boundary Batches, the per workspace rate, and the log streams) therefore
+read `0` or stay sparse; that is expected and documented in each panel
+description. Verified live through Grafana `POST /api/ds/query`: all ten query
+panels return HTTP 200 with real series or a clean `0`, and Grafana
+`GET /api/dashboards/uid/ai-governance` returns the imported dashboard.
+
 ## Ingress (HTTPS)
 
 `deploy/observability/grafana-ingress.yaml` follows the platform pattern

@@ -215,6 +215,16 @@ gated; Nova Pro is the proven fallback.
       Promtail `up` panels; "Workspace Builds" repointed to
       `coderd_workspace_latest_build_status` and "Postgres" to a real
       `coderd_db_tx_duration_seconds` signal (no postgres_exporter runs).
+- [x] **Merged AI Governance dashboard** (`deploy/observability/dashboards-ai-governance.yaml`,
+      uid `ai-governance`, ns `monitoring`) covers the AI Gateway (AI Bridge) and
+      the Agent Firewall (Boundary) in one view, replacing the two add-on
+      dashboards. AI Gateway panels use `coder_aibridged_*` (configured providers,
+      reload health, provider inventory) plus AI Bridge Loki logs
+      (`{namespace="coder"} |~ "aibridged"`); Agent Firewall panels use
+      `agent_boundary_log_proxy_batches_forwarded_total` plus Boundary Loki logs
+      (`{namespace="coder-workspaces"} |= "boundary"`). All ten query panels
+      verified HTTP 200 via Grafana `/api/ds/query`; usage panels read `0` until
+      live AI traffic occurs (placeholder Anthropic key).
 - [x] **Grafana Keycloak SSO (one SSO)**: Grafana signs in via the same realm
       (`coder`) through a confidential OIDC client `grafana`
       (`scripts/setup-grafana-oidc.py`, PKCE; secret in ASM
