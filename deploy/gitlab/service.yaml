@@ -1,0 +1,19 @@
+---
+# ClusterIP service fronting the GitLab pod. ingress-nginx routes to this on :80.
+# Also the StatefulSet's governing service (serviceName: gitlab).
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitlab
+  namespace: gitlab
+  labels:
+    app: gitlab
+spec:
+  type: ClusterIP
+  selector:
+    app: gitlab
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

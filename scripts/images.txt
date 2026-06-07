@@ -7,8 +7,38 @@
 #   docker.io/bitnami/postgresql:16   -> <ecr>/docker-hub/bitnami/postgresql:16
 #   ghcr.io/org/app:v1.2.3            -> <ecr>/ghcr/org/app:v1.2.3
 #   quay.io/keycloak/keycloak:26.0    -> <ecr>/quay/keycloak/keycloak:26.0
-#
-# Populate with the images each workstream actually needs. Examples (commented):
-# docker.io/library/nginx:1.27
-# quay.io/keycloak/keycloak:26.0
-# quay.io/jetstack/cert-manager-controller:v1.16.2
+
+# --- Coder control plane (deploy/coder) ---
+ghcr.io/coder/coder:v2.34.0
+
+# --- Keycloak SSO (deploy/keycloak) ---
+quay.io/keycloak/keycloak:26.6.3
+
+# --- GitLab single-container omnibus (deploy/gitlab) ---
+docker.io/gitlab/gitlab-ce:19.0.1-ce.0
+
+# --- Workspace base image for the Claude Code template (coder-templates/claude-code) ---
+docker.io/codercom/enterprise-base:ubuntu-noble-20260601
+
+# --- External Secrets Operator (deploy/platform/external-secrets) ---
+# Controller, webhook, and cert-controller all use this single image.
+ghcr.io/external-secrets/external-secrets:v2.6.0
+
+# --- Observability stack (deploy/observability) ---
+# kube-prometheus-stack 86.2.0 (Prometheus + Grafana + operator), minimal set.
+# Alertmanager, node-exporter, and kube-state-metrics are disabled, so their
+# images are intentionally not mirrored.
+quay.io/prometheus/prometheus:v3.12.0-distroless
+quay.io/prometheus-operator/prometheus-operator:v0.91.0
+quay.io/prometheus-operator/prometheus-config-reloader:v0.91.0
+docker.io/grafana/grafana:13.0.1-security-01
+quay.io/kiwigrid/k8s-sidecar:2.7.3
+
+# --- Logging stack (deploy/observability) ---
+# In-cluster logs: single-binary Grafana Loki plus a node-level Promtail
+# collector DaemonSet. Both pinned to the 3.5 release line (released in
+# lockstep). Loki persists on a filesystem PVC; Promtail tails /var/log/pods
+# and pushes to Loki. Referenced from manifests as the ECR mirror path
+# docker-hub/grafana/loki and docker-hub/grafana/promtail.
+docker.io/grafana/loki:3.5.9
+docker.io/grafana/promtail:3.5.9

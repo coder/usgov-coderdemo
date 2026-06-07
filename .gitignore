@@ -14,3 +14,4 @@ secrets/
 *.pem
 *.key
 *.tfvars.local
+.substrate-outputs.json

@@ -4,10 +4,34 @@
 
 | Audience | File |
 |---|---|
+| **As-built (what was actually deployed)** | **[as-built/README.md](as-built/README.md)** |
 | Human setup | [PRE-REQUISITES.md](PRE-REQUISITES.md) |
 | Orchestrator | [swarm/ORCHESTRATOR.md](swarm/ORCHESTRATOR.md) |
 | **All agents** | **[AGENT-PRD.md](AGENT-PRD.md)** |
 | Subagents | [swarm/RULES.md](swarm/RULES.md) + [swarm/workstreams/](swarm/workstreams/) |
+
+## As-built (current deployment)
+
+The engineering record of what is deployed and how it is configured. The swarm
+and workstream docs below describe the planned build; `as-built/` describes the
+live result.
+
+- [as-built/README.md](as-built/README.md) (index)
+- [as-built/00-overview.md](as-built/00-overview.md): architecture + flows
+- [as-built/55-observability.md](as-built/55-observability.md): in-cluster Prometheus + Grafana observability
+- [as-built/80-iac-vs-imperative.md](as-built/80-iac-vs-imperative.md): declarative vs imperative ledger
+- [as-built/85-secrets-management.md](as-built/85-secrets-management.md): secrets via ESO + AWS Secrets Manager
+- [as-built/90-operations-runbook.md](as-built/90-operations-runbook.md): day-2 ops
+
+## Plans (design proposals, not yet applied)
+
+Forward-looking designs with companion GitHub issues. Nothing in these plans is
+applied to the live environment.
+
+- [plans/README.md](plans/README.md) (index)
+- [plans/observability-aws-native.md](plans/observability-aws-native.md): AWS-native metrics + audit pipeline (AMP/AMG, CloudWatch/Firehose/S3/Athena, optional Security Lake)
+- [plans/gitops-control-plane.md](plans/gitops-control-plane.md): Argo CD control plane sourced from the in-cluster GitLab
+- [plans/gitops-adoption.md](plans/gitops-adoption.md): per-workload GitOps adoption + non-Kubernetes app state
 
 ## Architecture
 
