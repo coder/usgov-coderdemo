@@ -103,6 +103,14 @@ in each) and is additionally granted the Coder **site Owner** role
 group rule). One Keycloak login therefore administers the entire stack: every
 Coder org, GitLab, and Grafana.
 
+On its first Keycloak sign in `austen.platform` is forced to enroll a WebAuthn
+passkey and TOTP: it carries the `webauthn-register` and `CONFIGURE_TOTP`
+required actions (set by `scripts/setup-keycloak-hierarchy.py`, only while the
+matching credential is missing, so reconciles never re-force enrollment). The
+stock browser flow challenges TOTP on subsequent logins. Because of this, the
+headless `verify-oidc-login.py` probe does not apply to `austen.platform` once
+the required actions are set, until enrollment is completed interactively.
+
 ## Verified login matrix
 
 Run `scripts/verify-oidc-login.py` (fresh cookie jar per user, real Keycloak

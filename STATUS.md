@@ -154,6 +154,12 @@ gated; Nova Pro is the proven fallback.
       Alpha, and Bravo. The `pat.platform` persona is a normal Platform lead
       (Platform org-admin only, not a site Owner and not a GitLab admin). Sign in
       with "Keycloak" on each app.
+- [x] **Operator MFA enrollment enforced**: `austen.platform` carries the
+      Keycloak `webauthn-register` and `CONFIGURE_TOTP` required actions, so the
+      first Keycloak sign in forces passkey + TOTP enrollment
+      (`scripts/setup-keycloak-hierarchy.py`). The stock browser flow then
+      challenges TOTP on later logins; re-running the script never re-forces
+      enrollment once the credentials exist.
 - [x] **Local break-glass admins** remain per app (Coder owner, GitLab root,
       Grafana admin). Credentials live in
       `~/.config/usgov-coderdemo/generated-secrets.env` and AWS Secrets Manager

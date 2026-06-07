@@ -11,6 +11,11 @@ Reads admin + demo-user credentials from
 ~/.config/usgov-coderdemo/generated-secrets.env:
   KEYCLOAK_ADMIN_USERNAME, KEYCLOAK_ADMIN_PASSWORD, DEMO_USER_PASSWORD
 
+The operator super admin (austen.platform) is additionally given the
+webauthn-register and CONFIGURE_TOTP required actions, so Keycloak forces passkey
++ TOTP enrollment on its next sign in. The actions are only (re)applied while the
+matching credential is still missing, so a reconcile never forces re-enrollment.
+
 Pairs with scripts/setup-coder-idp-sync.py (the Coder side). The hierarchy is
 documented in docs/as-built/45-idp-sync-personas.md.
 """
@@ -41,6 +46,8 @@ USERS = {
     "austen.platform": {
         "first": "Austen", "last": "Platform",
         "password_env": "SUPERADMIN_PASSWORD",
+        # Force passkey + TOTP enrollment on first sign in (super admin account).
+        "required_actions": ["webauthn-register", "CONFIGURE_TOTP"],
         "groups": [
             "/platform", "/platform/platform-admins", "/platform/org-admins",
             "/alpha", "/alpha/org-admins",
@@ -82,6 +89,15 @@ USERS = {
 }
 
 EMAIL_DOMAIN = "usgov.coderdemo.io"
+
+# Maps a required action to the credential type it provisions. Used to enforce
+# MFA enrollment only while the credential is still missing, so reconciles stay
+# idempotent and never force a re-enrollment once the user is set up.
+REQUIRED_ACTION_CREDENTIAL = {
+    "CONFIGURE_TOTP": "otp",
+    "webauthn-register": "webauthn",
+    "webauthn-register-passwordless": "webauthn-passwordless",
+}
 
 
 def read_secrets():
@@ -219,6 +235,25 @@ def ensure_users(paths):
             gid = paths[gpath]
             code, _ = kc("PUT", f"/users/{uid}/groups/{gid}")
         print(f"  {username}: groups -> {', '.join(spec['groups'])}")
+        ensure_required_actions(uid, username, spec.get("required_actions") or [])
+
+
+def ensure_required_actions(uid, username, desired):
+    """Add required actions that enforce MFA enrollment, but only while the
+    matching credential is missing (so a reconcile never re-forces enrollment)."""
+    if not desired:
+        return
+    _, creds = kc("GET", f"/users/{uid}/credentials")
+    have = {c.get("type") for c in (creds or [])}
+    pending = [a for a in desired
+               if REQUIRED_ACTION_CREDENTIAL.get(a) not in have]
+    _, rep = kc("GET", f"/users/{uid}")
+    current = list(rep.get("requiredActions") or [])
+    merged = current + [a for a in pending if a not in current]
+    if merged != current:
+        rep["requiredActions"] = merged
+        kc("PUT", f"/users/{uid}", rep)
+    print(f"  {username}: required actions -> {merged or '[]'}")
 
 
 def main():
