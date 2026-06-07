@@ -147,6 +147,15 @@ coder:
     - name: CODER_EXTERNAL_AUTH_0_SCOPES
       value: "read_user read_repository write_repository"
 
+    # --- App isolation hardening ------------------------------------------
+    # Disable path-based workspace apps so every workspace app is served only
+    # from its own *.usgov.coderdemo.io subdomain. Path apps share the main
+    # dashboard origin and can make authenticated requests to the Coder API,
+    # so disabling them is the hardened posture. All templates here serve
+    # their apps with subdomain = true, so nothing relies on path apps.
+    - name: CODER_DISABLE_PATH_APPS
+      value: "true"
+
     # --- AI Gateway (AI Governance Add-On) --------------------------------
     # AI Gateway is enabled by default in v2.34; set explicitly for clarity.
     # NOTE: provider env vars are deprecated and seed the DB ONCE. After the

@@ -93,6 +93,24 @@ data "coder_workspace_owner" "me" {}
 data "coder_task" "me" {}
 
 # -----------------------------------------------------------------------------
+# Git external auth — in-cluster GitLab (in-boundary)
+# -----------------------------------------------------------------------------
+# Every workspace authenticates git against the in-cluster GitLab through
+# Coder's external-auth provider `gitlab` (configured on the Coder server, see
+# deploy/coder/values.yaml CODER_EXTERNAL_AUTH_0_*). Declaring this data source
+# makes the workspace REQUIRE a GitLab login: the dashboard surfaces a "Login
+# with GitLab" control and the agent only reports the auth as satisfied once
+# the owner has completed the OAuth flow. The Coder agent's git credential
+# helper then injects the short-lived OAuth token for any clone/fetch/push to
+# gitlab.usgov.coderdemo.io. No PATs or SSH keys live in the workspace, and no
+# auth path leaves the GovCloud boundary.
+#
+# id MUST match CODER_EXTERNAL_AUTH_0_ID on the Coder server ("gitlab").
+data "coder_external_auth" "gitlab" {
+  id = "gitlab"
+}
+
+# -----------------------------------------------------------------------------
 # Parameters — sizing and the AI task prompt
 # -----------------------------------------------------------------------------
 

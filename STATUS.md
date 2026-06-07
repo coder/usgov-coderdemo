@@ -97,6 +97,23 @@ gated; Nova Pro is the proven fallback.
       external-auth provider, so no auth path leaves the GovCloud boundary.
       (App id/secret recorded in `generated-secrets.env` as
       `GITLAB_CODER_OAUTH_*`.)
+- [x] **Every workspace template requires GitLab login.** The `claude-code`
+      template declares `data "coder_external_auth" "gitlab"` (id `gitlab`),
+      so each workspace must complete the in-boundary GitLab OAuth flow before
+      the agent reports ready; the agent's git credential helper then injects a
+      short-lived token for clone/fetch/push. Verified: the active template
+      version's `/external-auth` lists `gitlab` as required.
+
+## Demo hardening (runtime + Helm)
+- [x] **Path-based workspace apps disabled** (`CODER_DISABLE_PATH_APPS=true`,
+      Helm rev 4). Workspace apps are served only from their own
+      `*.usgov.coderdemo.io` subdomains (all templates use `subdomain = true`),
+      removing the same-origin path-app attack surface. Verified live
+      (`deployment/config.disable_path_apps = true`).
+- [x] **Classification banner** enabled: green `UNCLASSIFIED - USGOVCLOUD`
+      (`#007a33`). This is a runtime DB setting (premium-gated), NOT in Helm;
+      reproduce with `scripts/set-appearance.sh` (idempotent). Verified via
+      `GET /api/v2/appearance`.
 
 ## Out of scope (demo)
 OpenShift, Istio, observability, full identity sync.
