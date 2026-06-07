@@ -36,7 +36,15 @@ GROUP_TREE = {
 USERS = {
     "pat.platform": {
         "first": "Pat", "last": "Rivera",
-        "groups": ["/platform", "/platform/platform-admins", "/platform/org-admins"],
+        # Platform lead and demo super admin: a member of ALL tenant orgs (and
+        # org-admin in each) so a single Keycloak login is admin across every
+        # Coder org. Combined with the site Owner role and GitLab/Grafana admin,
+        # pat.platform is super admin across the whole stack.
+        "groups": [
+            "/platform", "/platform/platform-admins", "/platform/org-admins",
+            "/alpha", "/alpha/org-admins",
+            "/bravo", "/bravo/org-admins",
+        ],
     },
     "sky.sre": {
         "first": "Sky", "last": "Nguyen",

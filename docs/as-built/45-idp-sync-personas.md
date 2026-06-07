@@ -83,7 +83,7 @@ Email is `<username>@usgov.coderdemo.io`.
 
 | Username | Name | Org | Org role | Groups |
 |---|---|---|---|---|
-| pat.platform | Pat Rivera | Platform Engineering | organization-admin | platform-admins |
+| pat.platform | Pat Rivera | All (Platform + Alpha + Bravo) | organization-admin (all) + site Owner | platform-admins |
 | sky.sre | Sky Nguyen | Platform Engineering | organization-template-admin | sre |
 | alex.admin | Alex Carter | Mission Partner Alpha | organization-admin | (none) |
 | dana.dev | Dana Brooks | Mission Partner Alpha | member | developers |
@@ -99,6 +99,8 @@ login). Confirmed output:
 
 ```
 pat.platform  -> coder  organization-admin           groups=[platform-admins]
+              -> alpha  organization-admin           groups=[]
+              -> bravo  organization-admin           groups=[]
 sky.sre       -> coder  organization-template-admin  groups=[sre]
 alex.admin    -> alpha  organization-admin           groups=[]
 dana.dev      -> alpha  member                       groups=[developers]
@@ -109,8 +111,11 @@ riley.admin   -> bravo  organization-admin           groups=[]
 jordan.dev    -> bravo  member                       groups=[developers]
 ```
 
-Tenant isolation holds: Alpha users see only Alpha, Bravo users see only Bravo,
-Platform users see only Platform. The ISSO/auditor spans both tenants read-only.
+Tenant isolation holds for the mission-partner personas: Alpha users see only
+Alpha, Bravo users see only Bravo, and the ISSO/auditor spans both tenants
+read-only. `pat.platform` is the deliberate exception: it is the demo super admin
+(site Owner + org-admin in all three orgs + GitLab Administrator + Grafana
+Admin), so a single Keycloak login administers the whole stack.
 
 ## Provisioners and templates per tenant org
 
@@ -127,7 +132,8 @@ external auth first (every template declares `data coder_external_auth
 
 ## Demo flow
 
-1. Log in as `pat.platform`: lands in Platform Engineering as org admin.
+1. Log in as `pat.platform`: the demo super admin. Lands in all three orgs as
+   org admin (and is site Owner); switch orgs from the org picker.
 2. Log in (incognito) as `dana.dev`: lands only in Mission Partner Alpha, group
    developers, no admin. Cannot see Bravo or Platform.
 3. Log in as `riley.admin`: Bravo org admin; manage Bravo members/templates.

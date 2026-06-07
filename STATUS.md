@@ -145,8 +145,11 @@ gated; Nova Pro is the proven fallback.
       provisioned explicitly by `scripts/setup-gitlab-users.py`
       (`pat.platform` -> admin; others regular).
 - [x] **Unified super admin**: the SSO identity `pat.platform` is super admin in
-      all three (Coder site Owner via `scripts/grant-coder-owner.py`, GitLab
-      Administrator, Grafana org Admin). Sign in with "Keycloak" on each.
+      all three (Coder site Owner via `scripts/grant-coder-owner.py` plus
+      org-admin in every org, GitLab Administrator, Grafana org Admin). Pat is a
+      member of all three Coder orgs (added to the `/alpha` and `/bravo` Keycloak
+      groups in `scripts/setup-keycloak-hierarchy.py`), so the org switcher shows
+      Platform, Alpha, and Bravo. Sign in with "Keycloak" on each app.
 - [x] **Local break-glass admins** remain per app (Coder owner, GitLab root,
       Grafana admin). Credentials live in
       `~/.config/usgov-coderdemo/generated-secrets.env` and AWS Secrets Manager
