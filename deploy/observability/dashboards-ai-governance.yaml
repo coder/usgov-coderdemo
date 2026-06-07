@@ -1,23 +1,42 @@
 # AI Governance Grafana dashboard (Coder AI Governance add-on).
 #
-# A single merged dashboard (uid ai-governance) that covers BOTH halves of the
-# Coder AI Governance add-on:
-#   - AI Gateway, implemented in Coder as AI Bridge (aibridged). Panels read the
-#     coder_aibridged_* Prometheus series (configured providers and provider
-#     reload health) and stream AI Bridge logs from Loki (namespace coder).
-#   - Agent Firewall, implemented in Coder as Boundary. Panels read the
-#     agent_boundary_log_proxy_batches_forwarded_total Prometheus counter and
-#     stream Boundary logs from Loki (namespace coder-workspaces).
+# A single dashboard (uid ai-governance) that gives security and platform teams a
+# rich, customer-facing view of everything the Coder AI Governance add-on
+# intercepts, meters, and logs across both of its halves:
+#   - AI Gateway, implemented in Coder as AI Bridge (aibridged).
+#   - Agent Firewall, implemented in Coder as Boundary.
+#
+# The dashboard is organized into four rows:
+#   - AI Gateway Overview: provider health and reload status from Prometheus
+#     (coder_aibridged_* series), interception/session/user counts from the Coder
+#     database, and the live AI Gateway log stream from Loki.
+#   - Usage & Cost: token volume and derived cost over time, plus per-user and
+#     per-model breakdowns, from the Coder database. Cost is derived by pricing
+#     metered tokens (aibridge_token_usages) against ai_model_prices, whose
+#     per-million-token prices are stored in micro-units (dollars = tokens *
+#     price / 1e12).
+#   - Intercepts & Sessions: per-interception, per-session, prompt, tool, and
+#     token drill-downs (including session IDs) from the Coder database.
+#   - Agent Firewall: forwarded batch counters from Prometheus
+#     (agent_boundary_log_proxy_batches_forwarded_total), Boundary sessions from
+#     the Coder database, and the live Agent Firewall log stream from Loki.
+#
+# Data sources (all provisioned for the kube-prometheus-stack Grafana):
+#   - prometheus (uid prometheus): provider health + Agent Firewall batch counters.
+#   - loki (uid loki): AI Gateway and Agent Firewall log streams.
+#   - aibridge-postgres (uid aibridge-postgres): READ-ONLY Coder database role
+#     (grafana_ro) for usage, cost, intercept, and session drill-downs that have
+#     no Prometheus or Loki equivalent. Provisioned by
+#     deploy/observability/datasource-aibridge-postgres.yaml; the password is
+#     injected from a Kubernetes Secret, never committed to git.
 #
 # The Grafana sidecar imports any ConfigMap labelled grafana_dashboard: "1", so
-# this lives in the monitoring namespace next to Grafana. Every panel points at
-# datasource uid prometheus or uid loki, both provisioned by the
-# kube-prometheus-stack Grafana (loki via deploy/observability/loki-datasource.yaml).
+# this lives in the monitoring namespace next to Grafana.
 #
-# The live Anthropic key is a placeholder, so real AI calls fail and AI/agent
-# traffic is minimal. Usage panels therefore read 0 or stay sparse; that is
-# expected. Every panel still targets a real series or log query and returns a
-# clean result rather than a datasource error.
+# The live Anthropic key is a placeholder, so real AI calls fail before metering
+# tokens. Token, cost, prompt, and tool panels therefore read 0 or stay sparse;
+# that is expected. Every panel still targets a real series, log query, or table
+# and renders a clean result rather than a datasource error.
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -33,7 +52,7 @@ data:
     {
       "uid": "ai-governance",
       "title": "AI Governance",
-      "description": "Coder AI Governance add-on: merged view of the AI Gateway (AI Bridge) and the Agent Firewall (Boundary).",
+      "description": "Coder AI Governance add-on: AI Gateway (AI Bridge) and Agent Firewall (Boundary) health, usage, cost, intercepts, and sessions.",
       "tags": [
         "coder",
         "ai-governance"
@@ -48,7 +67,7 @@ data:
       "version": 1,
       "refresh": "1m",
       "time": {
-        "from": "now-6h",
+        "from": "now-7d",
         "to": "now"
       },
       "timepicker": {},
@@ -63,7 +82,7 @@ data:
         {
           "id": 1,
           "type": "text",
-          "title": "AI Governance (AI Gateway + Agent Firewall)",
+          "title": "Coder AI Governance",
           "datasource": null,
           "gridPos": {
             "h": 4,
@@ -73,13 +92,13 @@ data:
           },
           "options": {
             "mode": "markdown",
-            "content": "This is the Coder AI Governance view, covering the AI Gateway (AI Bridge) and the Agent Firewall (Boundary). AI Gateway panels show configured providers and reload health from Prometheus, plus the AI Bridge log stream from Loki. Agent Firewall panels show forwarded Boundary batches from Prometheus, plus the Boundary log stream from Loki. Traffic dependent panels populate as AI and agent activity occurs, so they can legitimately read 0 or stay sparse until live usage happens."
+            "content": "**Coder AI Governance** gives security and platform teams a single, customer-facing view of everything the **AI Gateway** (Coder's AI Bridge) and the **Agent Firewall** (Coder's Boundary) intercept, meter, and log.\n\n- **AI Gateway Overview**: provider health and the live intercept stream.\n- **Usage & Cost**: request, token, and derived-cost trends with per-user and per-model breakdowns.\n- **Intercepts & Sessions**: per-interception, per-session, prompt, and tool drill-downs (with session IDs) from the Coder database.\n- **Agent Firewall**: outbound activity audited inside workspaces.\n\nProvider health comes from Prometheus; usage, cost, and session drill-downs come from the Coder database; log streams come from Loki. The demo Anthropic key is a placeholder, so token and cost series stay near zero until real AI traffic flows; every panel still targets a real series and renders cleanly."
           }
         },
         {
           "id": 2,
           "type": "row",
-          "title": "AI Gateway (AI Bridge)",
+          "title": "AI Gateway Overview",
           "collapsed": false,
           "gridPos": {
             "h": 1,
@@ -93,14 +112,14 @@ data:
           "id": 3,
           "type": "stat",
           "title": "Configured Providers",
-          "description": "Number of AI providers configured in the AI Gateway (AI Bridge), from coder_aibridged_provider_info. Expected to be 2 in this demo (anthropic and anthropic-bedrock).",
+          "description": "Number of AI providers configured in the AI Gateway, from coder_aibridged_provider_info. Expected to be 2 in this demo (anthropic and anthropic-bedrock).",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
           "gridPos": {
-            "h": 6,
-            "w": 5,
+            "h": 4,
+            "w": 4,
             "x": 0,
             "y": 5
           },
@@ -161,15 +180,15 @@ data:
           "id": 4,
           "type": "stat",
           "title": "Provider Reload Status",
-          "description": "Whether the AI Bridge most recent provider config reload succeeded. Healthy means the last reload attempt matched the last successful reload (no failed reload in between). Compares coder_aibridged_providers_last_reload_timestamp_seconds with the success variant.",
+          "description": "Whether the AI Gateway's most recent provider config reload succeeded. Healthy means the last reload attempt matched the last successful reload.",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
           "gridPos": {
-            "h": 6,
-            "w": 5,
-            "x": 5,
+            "h": 4,
+            "w": 4,
+            "x": 4,
             "y": 5
           },
           "targets": [
@@ -241,15 +260,15 @@ data:
           "id": 5,
           "type": "stat",
           "title": "Last Successful Reload",
-          "description": "Time of the AI Bridge last successful provider reload, shown relative to now. It updates only when providers reload (startup or config change), so an older value reflects a stable provider configuration, not an error.",
+          "description": "Time of the AI Gateway's last successful provider reload, relative to now. Updates only on startup or config change, so an older value reflects a stable configuration.",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
           "gridPos": {
-            "h": 6,
-            "w": 5,
-            "x": 10,
+            "h": 4,
+            "w": 4,
+            "x": 8,
             "y": 5
           },
           "targets": [
@@ -295,7 +314,7 @@ data:
               "values": false
             },
             "orientation": "auto",
-            "textMode": "value",
+            "textMode": "auto",
             "colorMode": "none",
             "graphMode": "none",
             "justifyMode": "auto"
@@ -303,6 +322,195 @@ data:
         },
         {
           "id": 6,
+          "type": "stat",
+          "title": "Total Interceptions",
+          "description": "Total AI Gateway interceptions recorded in the Coder database over the selected range. Each interception is one intercepted AI API call.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 12,
+            "y": 5
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT count(*) AS value FROM aibridge_interceptions WHERE $__timeFilter(started_at)",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 7,
+          "type": "stat",
+          "title": "Active Sessions",
+          "description": "Distinct AI Gateway session IDs seen in the selected range, from aibridge_interceptions.session_id.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 16,
+            "y": 5
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT count(DISTINCT session_id) AS value FROM aibridge_interceptions WHERE $__timeFilter(started_at)",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 8,
+          "type": "stat",
+          "title": "Unique Users",
+          "description": "Distinct users who initiated AI Gateway interceptions in the selected range.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 20,
+            "y": 5
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT count(DISTINCT initiator_id) AS value FROM aibridge_interceptions WHERE $__timeFilter(started_at)",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 9,
           "type": "table",
           "title": "Provider Inventory",
           "description": "Inventory of AI Gateway providers from coder_aibridged_provider_info: provider name, type, and enabled status.",
@@ -311,10 +519,10 @@ data:
             "uid": "prometheus"
           },
           "gridPos": {
-            "h": 6,
-            "w": 9,
-            "x": 15,
-            "y": 5
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 9
           },
           "targets": [
             {
@@ -373,23 +581,163 @@ data:
           },
           "options": {
             "showHeader": true,
-            "cellHeight": "sm"
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
           }
         },
         {
-          "id": 7,
+          "id": 10,
+          "type": "piechart",
+          "title": "Interceptions by Provider",
+          "description": "Share of interceptions by provider name (anthropic, anthropic-direct, anthropic-bedrock) over the selected range, from the Coder database.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 9
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT COALESCE(i.provider_name, i.provider) AS provider, count(*) AS interceptions FROM aibridge_interceptions i WHERE $__timeFilter(i.started_at) GROUP BY 1 ORDER BY 2 DESC",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "hideFrom": {
+                  "tooltip": false,
+                  "viz": false,
+                  "legend": false
+                }
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [],
+              "fields": "",
+              "values": true
+            },
+            "pieType": "pie",
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            },
+            "legend": {
+              "displayMode": "list",
+              "placement": "right",
+              "showLegend": true,
+              "values": [
+                "value",
+                "percent"
+              ]
+            },
+            "displayLabels": [
+              "name",
+              "percent"
+            ]
+          }
+        },
+        {
+          "id": 11,
+          "type": "timeseries",
+          "title": "Interception Activity",
+          "description": "Interceptions per time bucket from the Coder database. Indicates AI Gateway request volume over time.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 9
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT $__timeGroupAlias(started_at, $__interval), count(*) AS \"Interceptions\" FROM aibridge_interceptions WHERE $__timeFilter(started_at) GROUP BY 1 ORDER BY 1",
+              "format": "time_series",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "showPoints": "auto",
+                "spanNulls": false,
+                "axisPlacement": "auto"
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 12,
           "type": "logs",
-          "title": "AI Bridge Log Stream",
-          "description": "Live AI Bridge (AI Gateway) log stream from Loki, namespace coder. Volume depends on AI usage; expect lifecycle lines such as provider pool reloads when AI traffic is low.",
+          "title": "AI Gateway Log Stream",
+          "description": "Live AI Gateway (AI Bridge) log stream from Loki, namespace coder. Volume depends on AI usage; expect lifecycle lines such as provider pool reloads when AI traffic is low.",
           "datasource": {
             "type": "loki",
             "uid": "loki"
           },
           "gridPos": {
-            "h": 9,
+            "h": 8,
             "w": 16,
             "x": 0,
-            "y": 11
+            "y": 17
           },
           "targets": [
             {
@@ -415,19 +763,19 @@ data:
           }
         },
         {
-          "id": 8,
+          "id": 13,
           "type": "timeseries",
-          "title": "AI Bridge Log Event Rate",
-          "description": "Count of AI Bridge log events in 5m windows from Loki. Indicates AI Gateway activity over time; flat or absent when there is no AI traffic.",
+          "title": "AI Gateway Log Event Rate",
+          "description": "Count of AI Gateway log events per time bucket from Loki. Indicates AI Gateway activity over time; flat or absent when there is no AI traffic.",
           "datasource": {
             "type": "loki",
             "uid": "loki"
           },
           "gridPos": {
-            "h": 9,
+            "h": 8,
             "w": 8,
             "x": 16,
-            "y": 11
+            "y": 17
           },
           "targets": [
             {
@@ -436,7 +784,7 @@ data:
                 "uid": "loki"
               },
               "editorMode": "code",
-              "expr": "sum(count_over_time({namespace=\"coder\"} |~ \"aibridged\" [5m]))",
+              "expr": "sum(count_over_time({namespace=\"coder\"} |~ \"aibridged\" [$__interval]))",
               "refId": "A",
               "queryType": "range",
               "legendFormat": "aibridged events"
@@ -481,32 +829,1120 @@ data:
           }
         },
         {
-          "id": 9,
+          "id": 14,
           "type": "row",
-          "title": "Agent Firewall (Boundary)",
+          "title": "Usage & Cost",
           "collapsed": false,
           "gridPos": {
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 20
+            "y": 25
           },
           "panels": []
         },
         {
-          "id": 10,
+          "id": 15,
           "type": "stat",
-          "title": "Total Boundary Batches Forwarded",
-          "description": "Total Boundary (Agent Firewall) log proxy batches forwarded, summed across workspaces, from agent_boundary_log_proxy_batches_forwarded_total. Increments as agents forward boundary egress logs; reads 0 until agent activity occurs.",
+          "title": "Input Tokens",
+          "description": "Total input (prompt) tokens metered by the AI Gateway over the selected range, from aibridge_token_usages.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 0,
+            "y": 26
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT COALESCE(SUM(tu.input_tokens),0) AS value FROM aibridge_token_usages tu JOIN aibridge_interceptions i ON i.id = tu.interception_id WHERE $__timeFilter(i.started_at)",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 16,
+          "type": "stat",
+          "title": "Output Tokens",
+          "description": "Total output (completion) tokens metered by the AI Gateway over the selected range.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 4,
+            "y": 26
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT COALESCE(SUM(tu.output_tokens),0) AS value FROM aibridge_token_usages tu JOIN aibridge_interceptions i ON i.id = tu.interception_id WHERE $__timeFilter(i.started_at)",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 17,
+          "type": "stat",
+          "title": "Cache Tokens",
+          "description": "Total cache read plus cache write tokens metered by the AI Gateway over the selected range.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 8,
+            "y": 26
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT COALESCE(SUM(COALESCE(tu.cache_read_input_tokens,0)+COALESCE(tu.cache_write_input_tokens,0)),0) AS value FROM aibridge_token_usages tu JOIN aibridge_interceptions i ON i.id = tu.interception_id WHERE $__timeFilter(i.started_at)",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 18,
+          "type": "stat",
+          "title": "Total Tokens",
+          "description": "Input plus output plus cache tokens metered by the AI Gateway over the selected range.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 12,
+            "y": 26
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT COALESCE(SUM(COALESCE(tu.input_tokens,0)+COALESCE(tu.output_tokens,0)+COALESCE(tu.cache_read_input_tokens,0)+COALESCE(tu.cache_write_input_tokens,0)),0) AS value FROM aibridge_token_usages tu JOIN aibridge_interceptions i ON i.id = tu.interception_id WHERE $__timeFilter(i.started_at)",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 19,
+          "type": "stat",
+          "title": "Estimated Cost",
+          "description": "Estimated AI spend over the selected range, derived by pricing metered tokens against ai_model_prices (per-million-token micro-unit prices). Near zero until real token usage is recorded.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 16,
+            "y": 26
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT COALESCE(SUM((COALESCE(tu.input_tokens,0)*COALESCE(p.input_price,0) + COALESCE(tu.output_tokens,0)*COALESCE(p.output_price,0) + COALESCE(tu.cache_read_input_tokens,0)*COALESCE(p.cache_read_price,0) + COALESCE(tu.cache_write_input_tokens,0)*COALESCE(p.cache_write_price,0))),0)::double precision/1e12 AS value FROM aibridge_token_usages tu JOIN aibridge_interceptions i ON i.id = tu.interception_id LEFT JOIN ai_model_prices p ON p.provider = i.provider AND p.model = i.model WHERE $__timeFilter(i.started_at)",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "decimals": 4,
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 20,
+          "type": "stat",
+          "title": "Cost / Interception",
+          "description": "Average estimated cost per interception over the selected range.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 20,
+            "y": 26
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT COALESCE(SUM((COALESCE(tu.input_tokens,0)*COALESCE(p.input_price,0) + COALESCE(tu.output_tokens,0)*COALESCE(p.output_price,0) + COALESCE(tu.cache_read_input_tokens,0)*COALESCE(p.cache_read_price,0) + COALESCE(tu.cache_write_input_tokens,0)*COALESCE(p.cache_write_price,0))),0)::double precision/1e12/NULLIF(count(DISTINCT i.id),0) AS value FROM aibridge_token_usages tu JOIN aibridge_interceptions i ON i.id = tu.interception_id LEFT JOIN ai_model_prices p ON p.provider = i.provider AND p.model = i.model WHERE $__timeFilter(i.started_at)",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "decimals": 4,
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 21,
+          "type": "timeseries",
+          "title": "Tokens Over Time",
+          "description": "Input, output, and cache tokens metered by the AI Gateway per time bucket, from the Coder database.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 30
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT $__timeGroupAlias(i.started_at, $__interval), SUM(tu.input_tokens) AS \"Input\", SUM(tu.output_tokens) AS \"Output\", SUM(COALESCE(tu.cache_read_input_tokens,0)+COALESCE(tu.cache_write_input_tokens,0)) AS \"Cache\" FROM aibridge_token_usages tu JOIN aibridge_interceptions i ON i.id = tu.interception_id WHERE $__timeFilter(i.started_at) GROUP BY 1 ORDER BY 1",
+              "format": "time_series",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "showPoints": "auto",
+                "spanNulls": false,
+                "axisPlacement": "auto",
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                }
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 22,
+          "type": "timeseries",
+          "title": "Estimated Cost Over Time",
+          "description": "Estimated AI spend per time bucket, derived from metered tokens priced against ai_model_prices.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 30
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT $__timeGroupAlias(i.started_at, $__interval), SUM((COALESCE(tu.input_tokens,0)*COALESCE(p.input_price,0) + COALESCE(tu.output_tokens,0)*COALESCE(p.output_price,0) + COALESCE(tu.cache_read_input_tokens,0)*COALESCE(p.cache_read_price,0) + COALESCE(tu.cache_write_input_tokens,0)*COALESCE(p.cache_write_price,0)))::double precision/1e12 AS \"Cost (USD)\" FROM aibridge_token_usages tu JOIN aibridge_interceptions i ON i.id = tu.interception_id LEFT JOIN ai_model_prices p ON p.provider = i.provider AND p.model = i.model WHERE $__timeFilter(i.started_at) GROUP BY 1 ORDER BY 1",
+              "format": "time_series",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "showPoints": "auto",
+                "spanNulls": false,
+                "axisPlacement": "auto"
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 23,
+          "type": "table",
+          "title": "Top Users by Usage & Cost",
+          "description": "Per-user interception, session, token, and estimated-cost totals over the selected range, from the Coder database.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 38
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT u.username AS \"User\", count(DISTINCT i.id) AS \"Interceptions\", count(DISTINCT i.session_id) AS \"Sessions\", COALESCE(SUM(tu.input_tokens),0) AS \"Input Tokens\", COALESCE(SUM(tu.output_tokens),0) AS \"Output Tokens\", ROUND(COALESCE(SUM((COALESCE(tu.input_tokens,0)*COALESCE(p.input_price,0) + COALESCE(tu.output_tokens,0)*COALESCE(p.output_price,0) + COALESCE(tu.cache_read_input_tokens,0)*COALESCE(p.cache_read_price,0) + COALESCE(tu.cache_write_input_tokens,0)*COALESCE(p.cache_write_price,0))),0)::numeric/1e12, 4) AS \"Cost (USD)\" FROM aibridge_interceptions i LEFT JOIN users u ON u.id = i.initiator_id LEFT JOIN aibridge_token_usages tu ON tu.interception_id = i.id LEFT JOIN ai_model_prices p ON p.provider = i.provider AND p.model = i.model WHERE $__timeFilter(i.started_at) GROUP BY u.username ORDER BY \"Cost (USD)\" DESC, \"Interceptions\" DESC LIMIT 100",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "transformations": [],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "filterable": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          }
+        },
+        {
+          "id": 24,
+          "type": "table",
+          "title": "Usage & Cost by Model",
+          "description": "Per-model interception, token, and estimated-cost totals over the selected range, from the Coder database.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 38
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT i.provider_name AS \"Provider\", i.model AS \"Model\", count(DISTINCT i.id) AS \"Interceptions\", COALESCE(SUM(tu.input_tokens),0) AS \"Input Tokens\", COALESCE(SUM(tu.output_tokens),0) AS \"Output Tokens\", ROUND(COALESCE(SUM((COALESCE(tu.input_tokens,0)*COALESCE(p.input_price,0) + COALESCE(tu.output_tokens,0)*COALESCE(p.output_price,0) + COALESCE(tu.cache_read_input_tokens,0)*COALESCE(p.cache_read_price,0) + COALESCE(tu.cache_write_input_tokens,0)*COALESCE(p.cache_write_price,0))),0)::numeric/1e12, 4) AS \"Cost (USD)\" FROM aibridge_interceptions i LEFT JOIN aibridge_token_usages tu ON tu.interception_id = i.id LEFT JOIN ai_model_prices p ON p.provider = i.provider AND p.model = i.model WHERE $__timeFilter(i.started_at) GROUP BY i.provider_name, i.model ORDER BY \"Interceptions\" DESC LIMIT 100",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "transformations": [],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "filterable": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          }
+        },
+        {
+          "id": 25,
+          "type": "piechart",
+          "title": "Token Split",
+          "description": "Share of input, output, cache-read, and cache-write tokens metered by the AI Gateway over the selected range.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 46
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT COALESCE(SUM(tu.input_tokens),0) AS \"Input\", COALESCE(SUM(tu.output_tokens),0) AS \"Output\", COALESCE(SUM(tu.cache_read_input_tokens),0) AS \"Cache Read\", COALESCE(SUM(tu.cache_write_input_tokens),0) AS \"Cache Write\" FROM aibridge_token_usages tu JOIN aibridge_interceptions i ON i.id = tu.interception_id WHERE $__timeFilter(i.started_at)",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "hideFrom": {
+                  "tooltip": false,
+                  "viz": false,
+                  "legend": false
+                }
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "sum"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "pieType": "pie",
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            },
+            "legend": {
+              "displayMode": "list",
+              "placement": "right",
+              "showLegend": true,
+              "values": [
+                "value",
+                "percent"
+              ]
+            },
+            "displayLabels": [
+              "name",
+              "percent"
+            ]
+          }
+        },
+        {
+          "id": 26,
+          "type": "piechart",
+          "title": "Interceptions by Model",
+          "description": "Share of interceptions by model over the selected range, from the Coder database.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 46
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT i.model AS model, count(*) AS interceptions FROM aibridge_interceptions i WHERE $__timeFilter(i.started_at) GROUP BY 1 ORDER BY 2 DESC",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "hideFrom": {
+                  "tooltip": false,
+                  "viz": false,
+                  "legend": false
+                }
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [],
+              "fields": "",
+              "values": true
+            },
+            "pieType": "pie",
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            },
+            "legend": {
+              "displayMode": "list",
+              "placement": "right",
+              "showLegend": true,
+              "values": [
+                "value",
+                "percent"
+              ]
+            },
+            "displayLabels": [
+              "name",
+              "percent"
+            ]
+          }
+        },
+        {
+          "id": 27,
+          "type": "bargauge",
+          "title": "Interceptions by User",
+          "description": "Interception count per user over the selected range, from the Coder database.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 46
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT u.username AS user, count(*) AS interceptions FROM aibridge_interceptions i LEFT JOIN users u ON u.id = i.initiator_id WHERE $__timeFilter(i.started_at) GROUP BY 1 ORDER BY 2 DESC LIMIT 15",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {
+            "orientation": "horizontal",
+            "displayMode": "gradient",
+            "valueMode": "color",
+            "showUnfilled": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": true
+            }
+          }
+        },
+        {
+          "id": 28,
+          "type": "row",
+          "title": "Intercepts & Sessions",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 54
+          },
+          "panels": []
+        },
+        {
+          "id": 29,
+          "type": "table",
+          "title": "Recent Interceptions",
+          "description": "Per-interception drill-down from the Coder database: time, user, provider, model, client, session ID, thread, credential kind, and duration. One row per intercepted AI API call.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 24,
+            "x": 0,
+            "y": 55
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT i.started_at AS \"Time\", u.username AS \"User\", i.provider_name AS \"Provider\", i.model AS \"Model\", COALESCE(NULLIF(i.client,''), i.metadata->>'request_user_agent', 'Unknown') AS \"Client\", i.session_id AS \"Session ID\", i.thread_root_id AS \"Thread\", i.credential_kind::text AS \"Credential\", round(EXTRACT(EPOCH FROM (i.ended_at - i.started_at)) * 1000)::int AS \"Duration (ms)\" FROM aibridge_interceptions i LEFT JOIN users u ON u.id = i.initiator_id WHERE $__timeFilter(i.started_at) ORDER BY i.started_at DESC LIMIT 200",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "transformations": [],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "filterable": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          }
+        },
+        {
+          "id": 30,
+          "type": "table",
+          "title": "Sessions",
+          "description": "Per-session rollup from the Coder database: session ID, user, interception count, models used, first and last seen, tokens, and estimated cost.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 64
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT i.session_id AS \"Session ID\", max(u.username) AS \"User\", count(DISTINCT i.id) AS \"Interceptions\", string_agg(DISTINCT i.model, ', ') AS \"Models\", min(i.started_at) AS \"First Seen\", max(COALESCE(i.ended_at, i.started_at)) AS \"Last Seen\", COALESCE(SUM(tu.input_tokens),0) AS \"Input Tokens\", COALESCE(SUM(tu.output_tokens),0) AS \"Output Tokens\", ROUND(COALESCE(SUM((COALESCE(tu.input_tokens,0)*COALESCE(p.input_price,0) + COALESCE(tu.output_tokens,0)*COALESCE(p.output_price,0) + COALESCE(tu.cache_read_input_tokens,0)*COALESCE(p.cache_read_price,0) + COALESCE(tu.cache_write_input_tokens,0)*COALESCE(p.cache_write_price,0))),0)::numeric/1e12, 4) AS \"Cost (USD)\" FROM aibridge_interceptions i LEFT JOIN users u ON u.id = i.initiator_id LEFT JOIN aibridge_token_usages tu ON tu.interception_id = i.id LEFT JOIN ai_model_prices p ON p.provider = i.provider AND p.model = i.model WHERE $__timeFilter(i.started_at) GROUP BY i.session_id ORDER BY \"Last Seen\" DESC LIMIT 200",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "transformations": [],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "filterable": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          }
+        },
+        {
+          "id": 31,
+          "type": "table",
+          "title": "Recent User Prompts",
+          "description": "Prompt drill-down from the Coder database: the user prompts captured per interception (time, user, model, session ID, prompt text). Populates once prompt capture records rows.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 72
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT up.created_at AS \"Time\", u.username AS \"User\", i.model AS \"Model\", i.session_id AS \"Session ID\", up.prompt AS \"Prompt\" FROM aibridge_user_prompts up JOIN aibridge_interceptions i ON i.id = up.interception_id LEFT JOIN users u ON u.id = i.initiator_id WHERE $__timeFilter(up.created_at) ORDER BY up.created_at DESC LIMIT 100",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "transformations": [],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "filterable": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          }
+        },
+        {
+          "id": 32,
+          "type": "table",
+          "title": "Recent Tool Calls",
+          "description": "Tool-use drill-down from the Coder database: tools invoked per interception, whether the tool was injected by policy, and any invocation error.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 72
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT tcu.created_at AS \"Time\", u.username AS \"User\", i.model AS \"Model\", tcu.tool AS \"Tool\", tcu.server_url AS \"Server\", tcu.injected AS \"Injected\", tcu.invocation_error AS \"Error\", i.session_id AS \"Session ID\" FROM aibridge_tool_usages tcu JOIN aibridge_interceptions i ON i.id = tcu.interception_id LEFT JOIN users u ON u.id = i.initiator_id WHERE $__timeFilter(tcu.created_at) ORDER BY tcu.created_at DESC LIMIT 100",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "transformations": [],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "filterable": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          }
+        },
+        {
+          "id": 33,
+          "type": "table",
+          "title": "Token Usage Detail",
+          "description": "Per-response token drill-down from the Coder database: input, output, cache-read, and cache-write tokens with estimated cost, joined to user, model, and session ID.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 80
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT tu.created_at AS \"Time\", u.username AS \"User\", i.provider_name AS \"Provider\", i.model AS \"Model\", i.session_id AS \"Session ID\", tu.input_tokens AS \"Input\", tu.output_tokens AS \"Output\", tu.cache_read_input_tokens AS \"Cache Read\", tu.cache_write_input_tokens AS \"Cache Write\", ROUND((COALESCE(tu.input_tokens,0)*COALESCE(p.input_price,0) + COALESCE(tu.output_tokens,0)*COALESCE(p.output_price,0) + COALESCE(tu.cache_read_input_tokens,0)*COALESCE(p.cache_read_price,0) + COALESCE(tu.cache_write_input_tokens,0)*COALESCE(p.cache_write_price,0))::numeric/1e12, 4) AS \"Cost (USD)\" FROM aibridge_token_usages tu JOIN aibridge_interceptions i ON i.id = tu.interception_id LEFT JOIN users u ON u.id = i.initiator_id LEFT JOIN ai_model_prices p ON p.provider = i.provider AND p.model = i.model WHERE $__timeFilter(tu.created_at) ORDER BY tu.created_at DESC LIMIT 200",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "transformations": [],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "filterable": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          }
+        },
+        {
+          "id": 34,
+          "type": "row",
+          "title": "Agent Firewall",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 88
+          },
+          "panels": []
+        },
+        {
+          "id": 35,
+          "type": "stat",
+          "title": "Total Batches Forwarded",
+          "description": "Total Agent Firewall (Boundary) log proxy batches forwarded, summed across workspaces, from agent_boundary_log_proxy_batches_forwarded_total. Increments as agents forward egress audit logs.",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
           "gridPos": {
-            "h": 6,
-            "w": 6,
+            "h": 4,
+            "w": 4,
             "x": 0,
-            "y": 21
+            "y": 89
           },
           "targets": [
             {
@@ -558,19 +1994,146 @@ data:
           }
         },
         {
-          "id": 11,
-          "type": "timeseries",
-          "title": "Forwarded Boundary Batches by Workspace",
-          "description": "Per workspace rate of Boundary batches forwarded (5m), from agent_boundary_log_proxy_batches_forwarded_total. Each line is a workspace and user. Stays at 0 until the agent firewall forwards egress logs.",
+          "id": 36,
+          "type": "stat",
+          "title": "Active Firewall Agents",
+          "description": "Number of workspace agents currently exporting Agent Firewall metrics, from agent_boundary_log_proxy_batches_forwarded_total.",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
           "gridPos": {
-            "h": 6,
-            "w": 18,
-            "x": 6,
-            "y": 21
+            "h": 4,
+            "w": 4,
+            "x": 4,
+            "y": 89
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "count(agent_boundary_log_proxy_batches_forwarded_total) or vector(0)",
+              "refId": "A",
+              "instant": true,
+              "range": false,
+              "format": "time_series"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 37,
+          "type": "stat",
+          "title": "Firewall Sessions",
+          "description": "Agent Firewall (Boundary) sessions recorded in the Coder database over the selected range, from boundary_sessions.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 8,
+            "y": 89
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT count(*) AS value FROM boundary_sessions WHERE $__timeFilter(started_at)",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 38,
+          "type": "timeseries",
+          "title": "Forwarded Batches by Workspace",
+          "description": "Per-workspace rate of Agent Firewall batches forwarded, from agent_boundary_log_proxy_batches_forwarded_total. Each line is a workspace and user.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 12,
+            "x": 12,
+            "y": 89
           },
           "targets": [
             {
@@ -626,19 +2189,19 @@ data:
           }
         },
         {
-          "id": 12,
+          "id": 39,
           "type": "table",
-          "title": "Active Boundary Agents",
-          "description": "Boundary agents currently exporting metrics, grouped by workspace, user, template, and agent, with total batches forwarded.",
+          "title": "Active Firewall Agents",
+          "description": "Agent Firewall agents currently exporting metrics, grouped by workspace, user, template, and agent, with total batches forwarded.",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
           "gridPos": {
-            "h": 7,
-            "w": 10,
+            "h": 8,
+            "w": 12,
             "x": 0,
-            "y": 27
+            "y": 93
           },
           "targets": [
             {
@@ -700,23 +2263,75 @@ data:
           },
           "options": {
             "showHeader": true,
-            "cellHeight": "sm"
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
           }
         },
         {
-          "id": 13,
+          "id": 40,
+          "type": "table",
+          "title": "Firewall Sessions",
+          "description": "Per-session Agent Firewall drill-down from the Coder database: session ID, workspace agent, confined process, and start/update times. Populates as the Agent Firewall opens sessions.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 93
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT bs.started_at AS \"Started\", wa.name AS \"Agent\", bs.confined_process_name AS \"Process\", bs.updated_at AS \"Updated\", bs.id AS \"Session ID\" FROM boundary_sessions bs LEFT JOIN workspace_agents wa ON wa.id = bs.workspace_agent_id WHERE $__timeFilter(bs.started_at) ORDER BY bs.started_at DESC LIMIT 200",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "transformations": [],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "filterable": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          }
+        },
+        {
+          "id": 41,
           "type": "logs",
-          "title": "Boundary Log Stream",
-          "description": "Live Boundary (Agent Firewall) log stream from Loki, namespace coder-workspaces. Currently proxy lifecycle and debug lines; allow and deny egress events appear here as AI traffic grows.",
+          "title": "Agent Firewall Log Stream",
+          "description": "Live Agent Firewall (Boundary) log stream from Loki, namespace coder-workspaces. Currently proxy lifecycle and debug lines; allow and deny egress events appear here as AI traffic grows.",
           "datasource": {
             "type": "loki",
             "uid": "loki"
           },
           "gridPos": {
-            "h": 7,
-            "w": 14,
-            "x": 10,
-            "y": 27
+            "h": 8,
+            "w": 16,
+            "x": 0,
+            "y": 101
           },
           "targets": [
             {
@@ -739,6 +2354,72 @@ data:
             "enableLogDetails": true,
             "dedupStrategy": "none",
             "sortOrder": "Descending"
+          }
+        },
+        {
+          "id": 42,
+          "type": "timeseries",
+          "title": "Agent Firewall Log Event Rate",
+          "description": "Count of Agent Firewall log events per time bucket from Loki. Indicates Agent Firewall activity over time.",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 101
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "editorMode": "code",
+              "expr": "sum(count_over_time({namespace=\"coder-workspaces\"} |= \"boundary\" [$__interval]))",
+              "refId": "A",
+              "queryType": "range",
+              "legendFormat": "boundary events"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "showPoints": "auto",
+                "spanNulls": false,
+                "axisPlacement": "auto"
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
           }
         }
       ]
