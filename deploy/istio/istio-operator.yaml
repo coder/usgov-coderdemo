@@ -75,9 +75,13 @@ spec:
               - name: http2
                 port: 80
                 targetPort: 8080
+              # 443 maps to a distinct container port (8443) to avoid duplicate
+              # containerPort generation on the gateway Deployment. The NLB
+              # already terminated TLS, so 8443 is a plain-HTTP listener here,
+              # served by the Gateway's port-443 HTTP server (see gateway.yaml).
               - name: https
                 port: 443
-                targetPort: 8080
+                targetPort: 8443
           serviceAnnotations:
             service.beta.kubernetes.io/aws-load-balancer-type: external
             service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
