@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-grant-coder-owner.py - grant the Coder site-wide Owner role to a demo persona so
-one Keycloak SSO identity (default pat.platform, the Platform lead) is super
-admin across Coder, GitLab, and Grafana.
+grant-coder-owner.py - grant the Coder site-wide Owner role to a user so one
+Keycloak SSO identity (default austen.platform, the operator super admin) is
+super admin across Coder, GitLab, and Grafana.
 
 Coder organization/role IdP sync only manages org-scoped roles; the site-wide
 Owner role is not claim-driven, so it is assigned explicitly here. Site roles are
@@ -13,7 +13,7 @@ Coder explicitly (NOT the ambient $CODER_URL). Admin creds come from
 ~/.config/usgov-coderdemo/generated-secrets.env.
 
 Usage:
-    python3 scripts/grant-coder-owner.py [username]   # default: pat.platform
+    python3 scripts/grant-coder-owner.py [username]   # default: austen.platform
 """
 import json
 import os
@@ -22,7 +22,7 @@ import urllib.error
 import urllib.request
 
 BASE = os.environ.get("DEMO_CODER_URL", "https://dev.usgov.coderdemo.io").rstrip("/")
-USERNAME = sys.argv[1] if len(sys.argv) > 1 else "pat.platform"
+USERNAME = sys.argv[1] if len(sys.argv) > 1 else "austen.platform"
 EMAIL_DOMAIN = "usgov.coderdemo.io"
 
 

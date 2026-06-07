@@ -10,10 +10,10 @@ login) and reconciles name, admin flag, active state, and the openid_connect
 identity (extern_uid = username) so a Keycloak SSO login lands on the right
 account. Mirrors the personas in scripts/setup-keycloak-hierarchy.py.
 
-Mapping applied (mirrors the Coder org-admin role; only Platform Engineering
+Mapping applied (mirrors the Coder org-admin role; only the operator super admin
 gets GitLab instance admin, to preserve tenant isolation):
-  pat.platform -> instance admin (Platform lead)
-  all other personas -> regular users
+  austen.platform -> instance admin (operator super admin)
+  all demo personas -> regular users
 
 Runs gitlab-rails inside the gitlab-0 pod (ROPC/password grant is disabled, so a
 REST token is not available without a bootstrap). The demo password is read from
@@ -34,21 +34,26 @@ POD = "gitlab-0"
 RUBY = r'''
 admin = User.find_by(username: "root")
 org   = Organizations::Organization.default_organization
-pw    = ENV["DEMO_USER_PASSWORD"].to_s
-abort("DEMO_USER_PASSWORD not provided") if pw.empty?
+pwmap = {
+  "DEMO_USER_PASSWORD"  => ENV["DEMO_USER_PASSWORD"].to_s,
+  "SUPERADMIN_PASSWORD" => ENV["SUPERADMIN_PASSWORD"].to_s,
+}
 
 personas = [
-  ["pat.platform", "Pat Rivera",  true],
-  ["sky.sre",      "Sky Nguyen",  false],
-  ["alex.admin",   "Alex Carter", false],
-  ["dana.dev",     "Dana Brooks", false],
-  ["quinn.data",   "Quinn Lee",   false],
-  ["morgan.isso",  "Morgan Diaz", false],
-  ["riley.admin",  "Riley Fox",   false],
-  ["jordan.dev",   "Jordan Kim",  false],
+  ["austen.platform", "Austen Platform", true,  "SUPERADMIN_PASSWORD"],
+  ["pat.platform",    "Pat Rivera",      false, "DEMO_USER_PASSWORD"],
+  ["sky.sre",         "Sky Nguyen",      false, "DEMO_USER_PASSWORD"],
+  ["alex.admin",      "Alex Carter",     false, "DEMO_USER_PASSWORD"],
+  ["dana.dev",        "Dana Brooks",     false, "DEMO_USER_PASSWORD"],
+  ["quinn.data",      "Quinn Lee",       false, "DEMO_USER_PASSWORD"],
+  ["morgan.isso",     "Morgan Diaz",     false, "DEMO_USER_PASSWORD"],
+  ["riley.admin",     "Riley Fox",       false, "DEMO_USER_PASSWORD"],
+  ["jordan.dev",      "Jordan Kim",      false, "DEMO_USER_PASSWORD"],
 ]
 
-personas.each do |uname, fullname, is_admin|
+personas.each do |uname, fullname, is_admin, pw_env|
+  pw = pwmap[pw_env].to_s
+  abort("password #{pw_env} not provided") if pw.empty?
   email = "#{uname}@usgov.coderdemo.io"
   u = User.find_by(username: uname)
   if u.nil?
@@ -76,15 +81,19 @@ end
 '''
 
 
-def read_demo_password():
+def read_passwords():
     path = os.path.expanduser("~/.config/usgov-coderdemo/generated-secrets.env")
+    out = {}
     with open(path) as f:
         for line in f:
             line = line.strip()
-            if line.startswith("DEMO_USER_PASSWORD="):
-                return line.split("=", 1)[1]
-    print("DEMO_USER_PASSWORD not found in generated-secrets.env", file=sys.stderr)
-    sys.exit(1)
+            for key in ("DEMO_USER_PASSWORD", "SUPERADMIN_PASSWORD"):
+                if line.startswith(key + "="):
+                    out[key] = line.split("=", 1)[1]
+    if "DEMO_USER_PASSWORD" not in out:
+        print("DEMO_USER_PASSWORD not found in generated-secrets.env", file=sys.stderr)
+        sys.exit(1)
+    return out["DEMO_USER_PASSWORD"], out.get("SUPERADMIN_PASSWORD", "")
 
 
 def kubectl_exec(stdin_data, shell_cmd):
@@ -94,17 +103,19 @@ def kubectl_exec(stdin_data, shell_cmd):
 
 
 def main():
-    pw = read_demo_password()
+    demo_pw, super_pw = read_passwords()
     # 1. Stage the Ruby script in the pod (contains no secret).
     r = kubectl_exec(RUBY, "cat > /tmp/setup-gitlab-users.rb")
     if r.returncode != 0:
         print(r.stderr, file=sys.stderr)
         sys.exit(1)
-    # 2. Run it with the password supplied over stdin -> env (not argv).
+    # 2. Run it with the passwords supplied over stdin -> env (not argv).
     r = kubectl_exec(
-        pw,
-        'read -r PW; DEMO_USER_PASSWORD="$PW" gitlab-rails runner '
-        '/tmp/setup-gitlab-users.rb; rc=$?; rm -f /tmp/setup-gitlab-users.rb; exit $rc')
+        demo_pw + "\n" + super_pw + "\n",
+        'read -r DPW; read -r SPW; '
+        'DEMO_USER_PASSWORD="$DPW" SUPERADMIN_PASSWORD="$SPW" '
+        'gitlab-rails runner /tmp/setup-gitlab-users.rb; '
+        'rc=$?; rm -f /tmp/setup-gitlab-users.rb; exit $rc')
     sys.stdout.write(r.stdout)
     if r.returncode != 0:
         sys.stderr.write(r.stderr)

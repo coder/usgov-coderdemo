@@ -83,7 +83,7 @@ Email is `<username>@usgov.coderdemo.io`.
 
 | Username | Name | Org | Org role | Groups |
 |---|---|---|---|---|
-| pat.platform | Pat Rivera | All (Platform + Alpha + Bravo) | organization-admin (all) + site Owner | platform-admins |
+| pat.platform | Pat Rivera | Platform Engineering | organization-admin | platform-admins |
 | sky.sre | Sky Nguyen | Platform Engineering | organization-template-admin | sre |
 | alex.admin | Alex Carter | Mission Partner Alpha | organization-admin | (none) |
 | dana.dev | Dana Brooks | Mission Partner Alpha | member | developers |
@@ -92,15 +92,27 @@ Email is `<username>@usgov.coderdemo.io`.
 | riley.admin | Riley Fox | Mission Partner Bravo | organization-admin | (none) |
 | jordan.dev | Jordan Kim | Mission Partner Bravo | member | developers |
 
+## Operator super admin (not a demo persona)
+
+`austen.platform` (Austen Platform) is the dedicated operator account, separate
+from the eight demo personas and with its own password in `SUPERADMIN_PASSWORD`.
+It belongs to the `/platform`, `/alpha`, and `/bravo` Keycloak groups (org-admin
+in each) and is additionally granted the Coder **site Owner** role
+(`scripts/grant-coder-owner.py`), **GitLab instance admin**
+(`scripts/setup-gitlab-users.py`), and **Grafana org Admin** (via the `/platform`
+group rule). One Keycloak login therefore administers the entire stack: every
+Coder org, GitLab, and Grafana.
+
 ## Verified login matrix
 
 Run `scripts/verify-oidc-login.py` (fresh cookie jar per user, real Keycloak
 login). Confirmed output:
 
 ```
+austen.platform -> coder  organization-admin           groups=[platform-admins]   site_roles=[owner]
+                -> alpha  organization-admin           groups=[]
+                -> bravo  organization-admin           groups=[]
 pat.platform  -> coder  organization-admin           groups=[platform-admins]
-              -> alpha  organization-admin           groups=[]
-              -> bravo  organization-admin           groups=[]
 sky.sre       -> coder  organization-template-admin  groups=[sre]
 alex.admin    -> alpha  organization-admin           groups=[]
 dana.dev      -> alpha  member                       groups=[developers]
@@ -113,9 +125,10 @@ jordan.dev    -> bravo  member                       groups=[developers]
 
 Tenant isolation holds for the mission-partner personas: Alpha users see only
 Alpha, Bravo users see only Bravo, and the ISSO/auditor spans both tenants
-read-only. `pat.platform` is the deliberate exception: it is the demo super admin
-(site Owner + org-admin in all three orgs + GitLab Administrator + Grafana
-Admin), so a single Keycloak login administers the whole stack.
+read-only. The operator account `austen.platform` is the deliberate exception:
+it is super admin (site Owner + org-admin in all three orgs + GitLab
+Administrator + Grafana Admin), so a single Keycloak login administers the whole
+stack. `pat.platform` is a normal Platform lead (Platform org-admin only).
 
 ## Provisioners and templates per tenant org
 
@@ -132,8 +145,8 @@ external auth first (every template declares `data coder_external_auth
 
 ## Demo flow
 
-1. Log in as `pat.platform`: the demo super admin. Lands in all three orgs as
-   org admin (and is site Owner); switch orgs from the org picker.
+1. Log in as `austen.platform`: the operator super admin. Lands in all three
+   orgs as org admin (and is site Owner); switch orgs from the org picker.
 2. Log in (incognito) as `dana.dev`: lands only in Mission Partner Alpha, group
    developers, no admin. Cannot see Bravo or Platform.
 3. Log in as `riley.admin`: Bravo org admin; manage Bravo members/templates.
@@ -155,3 +168,12 @@ python3 scripts/verify-oidc-login.py pat.platform dana.dev morgan.isso riley.adm
 ```
 
 Both setup scripts are idempotent.
+
+The operator super admin `austen.platform` also needs its cross-app admin grants
+(idempotent; credentials are read from `generated-secrets.env`):
+
+```
+python3 scripts/grant-coder-owner.py austen.platform   # Coder site Owner
+python3 scripts/setup-gitlab-users.py                  # GitLab instance admin
+# Grafana org Admin is automatic via the /platform group rule
+```

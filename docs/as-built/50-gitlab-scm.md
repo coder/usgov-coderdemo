@@ -187,13 +187,15 @@ edition without SAML Group Sync (a Premium feature).
 
 Because of that, the persona users and the instance admin attribute are
 provisioned explicitly by `scripts/setup-gitlab-users.py` (idempotent,
-`gitlab-rails`): it creates the eight personas from
-`scripts/setup-keycloak-hierarchy.py`, links each to its `openid_connect`
-identity (`extern_uid = preferred_username`) so SSO lands on the right account,
-and sets GitLab instance admin only on `pat.platform` (the Platform lead),
-mirroring the Coder org-admin mapping while keeping tenant isolation. Verified
-live: `pat.platform` SSO login is `is_admin=true` (`/admin` returns 200);
-`dana.dev` is a regular user (`/admin` returns 404).
+`gitlab-rails`): it creates the eight demo personas from
+`scripts/setup-keycloak-hierarchy.py` plus the operator super admin
+`austen.platform`, links each to its `openid_connect` identity
+(`extern_uid = preferred_username`) so SSO lands on the right account, and sets
+GitLab instance admin only on `austen.platform` (the operator super admin),
+keeping every demo persona (including the Platform lead `pat.platform`) a regular
+user to preserve tenant isolation. Verified live: `austen.platform` SSO login is
+`is_admin=true` (`/admin` returns 200); `pat.platform` and `dana.dev` are regular
+users (`/admin` returns 404).
 
 ## Notes and out of scope
 

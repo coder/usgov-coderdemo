@@ -135,7 +135,7 @@ gated; Nova Pro is the proven fallback.
       `claude-code` template pushed into all three orgs.
 - See `docs/as-built/45-idp-sync-personas.md` for the full hierarchy + matrix.
 
-## Single sign-on + demo super admin
+## Single sign-on + operator super admin
 - [x] **One SSO across the stack**: Coder, GitLab, and Grafana all authenticate
       against the Keycloak realm `coder`. Grafana via generic OAuth
       (`scripts/setup-grafana-oidc.py`); GitLab via OmniAuth `openid_connect`
@@ -143,13 +143,17 @@ gated; Nova Pro is the proven fallback.
 - [x] **GitLab CE caveat**: CE has no OIDC group-to-role mapping (an EE
       feature), so GitLab persona users + the instance admin attribute are
       provisioned explicitly by `scripts/setup-gitlab-users.py`
-      (`pat.platform` -> admin; others regular).
-- [x] **Unified super admin**: the SSO identity `pat.platform` is super admin in
-      all three (Coder site Owner via `scripts/grant-coder-owner.py` plus
-      org-admin in every org, GitLab Administrator, Grafana org Admin). Pat is a
-      member of all three Coder orgs (added to the `/alpha` and `/bravo` Keycloak
-      groups in `scripts/setup-keycloak-hierarchy.py`), so the org switcher shows
-      Platform, Alpha, and Bravo. Sign in with "Keycloak" on each app.
+      (`austen.platform` -> admin; all demo personas regular).
+- [x] **Unified super admin**: a dedicated operator SSO identity
+      `austen.platform` (its own `SUPERADMIN_PASSWORD`, not a demo persona) is
+      super admin in all three (Coder site Owner via
+      `scripts/grant-coder-owner.py` plus org-admin in every org, GitLab
+      Administrator, Grafana org Admin). It is a member of all three Coder orgs
+      (the `/platform`, `/alpha`, and `/bravo` Keycloak groups in
+      `scripts/setup-keycloak-hierarchy.py`), so the org switcher shows Platform,
+      Alpha, and Bravo. The `pat.platform` persona is a normal Platform lead
+      (Platform org-admin only, not a site Owner and not a GitLab admin). Sign in
+      with "Keycloak" on each app.
 - [x] **Local break-glass admins** remain per app (Coder owner, GitLab root,
       Grafana admin). Credentials live in
       `~/.config/usgov-coderdemo/generated-secrets.env` and AWS Secrets Manager
@@ -192,7 +196,7 @@ gated; Nova Pro is the proven fallback.
       `usgov-coderdemo/observability/grafana-oauth`, ESO-synced). Group
       membership maps to org role: `/platform` -> Grafana `Admin`, others ->
       `Viewer`; local admin kept as break-glass. Verified per persona
-      (`pat.platform` Admin, `dana.dev` Viewer).
+      (`austen.platform` Admin, `dana.dev` Viewer).
 - [x] **Structured JSON server logs** (`CODER_LOGGING_JSON=/dev/stderr`,
       `CODER_LOGGING_HUMAN=/dev/null`) make coderd SIEM-ready; audit logging is
       entitled + on (`/audit`).

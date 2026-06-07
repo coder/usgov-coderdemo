@@ -151,7 +151,7 @@ is intentionally left enabled (`disable_login_form: false`) as break-glass.
 
 Verified live with a headless authorization-code login per persona: the login
 page shows "Sign in with Keycloak"; `/login/generic_oauth` redirects to the realm
-with `client_id=grafana` and PKCE; `pat.platform` (`/platform`) lands as org
+with `client_id=grafana` and PKCE; `austen.platform` (`/platform`) lands as org
 role `Admin` (the admin-only `/api/org/users` returns 200) while `dana.dev`
 (`/alpha`) lands as `Viewer` (same endpoint returns 403). Both arrive
 `authLabels: ["Generic OAuth"]`, `isExternallySynced: true`.

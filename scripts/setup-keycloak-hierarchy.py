@@ -34,17 +34,22 @@ GROUP_TREE = {
 
 # Persona users -> full group paths they belong to.
 USERS = {
-    "pat.platform": {
-        "first": "Pat", "last": "Rivera",
-        # Platform lead and demo super admin: a member of ALL tenant orgs (and
-        # org-admin in each) so a single Keycloak login is admin across every
-        # Coder org. Combined with the site Owner role and GitLab/Grafana admin,
-        # pat.platform is super admin across the whole stack.
+    # Operator super admin (not a demo persona). Dedicated account for the demo
+    # operator: a member of ALL tenant orgs (org-admin in each) plus the Coder
+    # site Owner role, GitLab instance admin, and Grafana admin, so one Keycloak
+    # login administers the whole stack. Uses its own SUPERADMIN_PASSWORD.
+    "austen.platform": {
+        "first": "Austen", "last": "Platform",
+        "password_env": "SUPERADMIN_PASSWORD",
         "groups": [
             "/platform", "/platform/platform-admins", "/platform/org-admins",
             "/alpha", "/alpha/org-admins",
             "/bravo", "/bravo/org-admins",
         ],
+    },
+    "pat.platform": {
+        "first": "Pat", "last": "Rivera",
+        "groups": ["/platform", "/platform/platform-admins", "/platform/org-admins"],
     },
     "sky.sre": {
         "first": "Sky", "last": "Nguyen",
@@ -184,8 +189,11 @@ def ensure_mapper():
 
 
 def ensure_users(paths):
-    pw = SECRETS["DEMO_USER_PASSWORD"]
     for username, spec in USERS.items():
+        pw_env = spec.get("password_env")
+        pw = SECRETS.get(pw_env) if pw_env else None
+        if not pw:
+            pw = SECRETS["DEMO_USER_PASSWORD"]
         _, found = kc("GET", "/users?exact=true&username=" + urllib.parse.quote(username))
         if found:
             uid = found[0]["id"]
