@@ -68,6 +68,8 @@ Terraform resources (created by the mirror script, see below).
 | ECR repositories + image mirroring (5 images) | `scripts/mirror-images.sh` (crane) + `scripts/images.txt` | live `aws ecr describe-repositories` |
 | k8s Secrets `coder-db`, `coder-oidc`, `coder-ai`, `coder-external-auth` | `kubectl create secret` | `deploy/coder/secrets.example.yaml`; `deploy/platform/README.md` |
 | k8s Secrets `keycloak-db`, `keycloak-admin`, `gitlab-secrets` | `kubectl create secret` | `deploy/keycloak/README.md`, `deploy/gitlab/README.md` |
+| Migrate the 9 runtime Secrets to AWS Secrets Manager + sync via External Secrets Operator (IRSA) | Helm (ESO chart 2.6.0) + `scripts/migrate-secrets-to-asm.py` + ExternalSecret CRDs | live ESO; `docs/as-built/85-secrets-management.md` |
+| ESO IRSA role `usgov-coderdemo-external-secrets` (Secrets Manager read) | AWS CLI/IAM | live IAM; codified in `terraform/secrets-hardening.tf` |
 | Workspace RBAC in `coder-workspaces` | `kubectl apply -f deploy/platform/workspace-rbac.yaml` | live `kubectl get role -n coder-workspaces` |
 | Keycloak Deployment/Service/Ingress + realm `coder` import | `kubectl apply -k deploy/keycloak/` | `deploy/keycloak/*`; live pod `keycloak` |
 | GitLab StatefulSet/Service/Ingress (embedded Postgres) | `kubectl apply -f deploy/gitlab/*` | `deploy/gitlab/*`; live pod `gitlab-0` |
@@ -113,9 +115,13 @@ expands it with every imperative item found above. Ordered roughly by layer.
 9. Manage ECR repositories as `aws_ecr_repository` (the registry host is already
    an output); keep image mirroring (`scripts/mirror-images.sh`) as an explicit
    pipeline step since image content is not Terraform's job.
-10. Decide a source of truth for Kubernetes Secrets (`coder-db`, `coder-oidc`,
-    `coder-ai`, `coder-external-auth`, `keycloak-db`, `keycloak-admin`,
-    `gitlab-secrets`); keep real values out of git.
+10. Source of truth for Kubernetes Secrets: RESOLVED. The 9 runtime app Secrets
+    now live in AWS Secrets Manager (`usgov-coderdemo/*`) and are synced by the
+    External Secrets Operator via IRSA (`docs/as-built/85-secrets-management.md`).
+    Remaining: import the live ESO IAM role into Terraform
+    (`terraform/secrets-hardening.tf`) before a reconciliation apply, and enable
+    EKS Secrets envelope encryption with the customer-managed KMS key defined in
+    that file (IRREVERSIBLE, not yet applied).
 11. Manage workspace RBAC (`coder-workspaces` Role/RoleBinding) declaratively.
 12. Manage Keycloak (Deployment/Service/Ingress + realm import) and GitLab
     (StatefulSet/Service/Ingress) manifests under a GitOps or Terraform path.

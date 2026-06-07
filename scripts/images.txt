@@ -19,3 +19,7 @@ docker.io/gitlab/gitlab-ce:19.0.1-ce.0
 
 # --- Workspace base image for the Claude Code template (coder-templates/claude-code) ---
 docker.io/codercom/enterprise-base:ubuntu-noble-20260601
+
+# --- External Secrets Operator (deploy/platform/external-secrets) ---
+# Controller, webhook, and cert-controller all use this single image.
+ghcr.io/external-secrets/external-secrets:v2.6.0

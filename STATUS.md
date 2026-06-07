@@ -135,5 +135,22 @@ gated; Nova Pro is the proven fallback.
       `claude-code` template pushed into all three orgs.
 - See `docs/as-built/45-idp-sync-personas.md` for the full hierarchy + matrix.
 
+## Secrets management (ESO + AWS Secrets Manager)
+- [x] **AWS Secrets Manager is the source of truth** for the 9 runtime app
+      secrets (`usgov-coderdemo/{coder,keycloak,gitlab}/*`). No secret material
+      in git.
+- [x] **External Secrets Operator** (chart 2.6.0, ns `external-secrets`, ECR
+      mirror image) syncs ASM into the app namespaces via IRSA role
+      `usgov-coderdemo-external-secrets` (read-only, scoped to
+      `usgov-coderdemo/*`, no static keys). ClusterSecretStore
+      `aws-secretsmanager` Valid; all 9 ExternalSecrets SecretSynced.
+- [x] Migrated with `scripts/migrate-secrets-to-asm.py`; ESO adopted the
+      existing Secrets with byte-identical data (no app disruption);
+      delete/recreate recovery verified.
+- [ ] **EKS Secrets envelope encryption (customer KMS)**: NOT applied
+      (irreversible re-encrypt; needs a maintenance decision). Codified in
+      `terraform/secrets-hardening.tf`.
+- See `docs/as-built/85-secrets-management.md`.
+
 ## Out of scope (demo)
 OpenShift, Istio, observability.

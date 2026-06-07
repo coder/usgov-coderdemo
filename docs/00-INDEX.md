@@ -19,6 +19,7 @@ live result.
 - [as-built/README.md](as-built/README.md) (index)
 - [as-built/00-overview.md](as-built/00-overview.md): architecture + flows
 - [as-built/80-iac-vs-imperative.md](as-built/80-iac-vs-imperative.md): declarative vs imperative ledger
+- [as-built/85-secrets-management.md](as-built/85-secrets-management.md): secrets via ESO + AWS Secrets Manager
 - [as-built/90-operations-runbook.md](as-built/90-operations-runbook.md): day-2 ops
 
 ## Architecture

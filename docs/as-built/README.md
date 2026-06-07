@@ -21,6 +21,7 @@ docs explain the *how* and *why* behind that status.
 | [60-ai-gateway.md](60-ai-gateway.md) | AI Gateway / AI Bridge: DB-managed providers (`anthropic` direct + `anthropic-bedrock` IRSA), name-based routing, the end-to-end request flow, and the remaining action to make AI respond. |
 | [70-workspace-templates.md](70-workspace-templates.md) | The `claude-code` workspace template: pod/PVC, the claude-code module (4.7.3), Coder Tasks, parameters, and the required GitLab external auth. |
 | [80-iac-vs-imperative.md](80-iac-vs-imperative.md) | The declarative-versus-imperative ledger and the Terraform reconciliation backlog. |
+| [85-secrets-management.md](85-secrets-management.md) | Runtime secrets via External Secrets Operator + AWS Secrets Manager (IRSA): ASM layout, migration, verification, and the EKS CMK backlog. |
 | [90-operations-runbook.md](90-operations-runbook.md) | Day-2 operations: env/kubeconfig, API/CLI login, Helm upgrade, template push, image mirroring, banner, health checks, known gaps. |
 
 ## One thing to know before reading
