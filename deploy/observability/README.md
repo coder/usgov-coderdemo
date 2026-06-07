@@ -1,9 +1,9 @@
-# Observability stack (in-cluster metrics + dashboards)
+# Observability stack (in-cluster metrics, logs + dashboards)
 
-In-boundary, in-cluster metrics and dashboards for the GovCloud demo. It scrapes
-the Coder control plane's Prometheus metrics and renders Coder's prebuilt
-Grafana dashboards with live data, reachable over HTTPS at
-`https://grafana.usgov.coderdemo.io`.
+In-boundary, in-cluster metrics, logs, and dashboards for the GovCloud demo. It
+scrapes the Coder control plane's Prometheus metrics, collects pod logs into
+Loki, and renders Coder's prebuilt Grafana dashboards with live data, reachable
+over HTTPS at `https://grafana.usgov.coderdemo.io`.
 
 This is the reliable in-cluster implementation. The AWS-native managed variant
 (Amazon Managed Prometheus / Grafana, Security Lake) is planned separately and
@@ -19,6 +19,9 @@ is not built here.
 | Prometheus operator | Deployment `kps-kube-prometheus-stack-operator`. Admission webhooks disabled. |
 | Coder scrape | `coder-metrics` headless Service (port 2112) + `ServiceMonitor/coder`, both in namespace `coder`. Prometheus job `coder-metrics`. |
 | Dashboards | Six Coder dashboards as ConfigMaps in `monitoring`, imported by the Grafana sidecar (label `grafana_dashboard: "1"`). |
+| Loki | Single-binary Deployment `loki` (10Gi gp3 PVC, filesystem object store, tsdb schema v13, ~168h retention). Service `loki:3100`. Config `loki.yaml`. Scraped via `ServiceMonitor/loki`. |
+| Promtail | DaemonSet `promtail` tailing `/var/log/pods` on every node and pushing to `loki.monitoring.svc:3100`. Config `promtail.yaml`. Scraped via `ServiceMonitor/promtail`. |
+| Loki datasource | `loki-datasource.yaml` ConfigMap (label `grafana_datasource: "1"`, uid `loki`), provisioned by the Grafana sidecar. Powers the dashboards' log panels. |
 | Ingress | `grafana` Ingress (className `nginx`, host `grafana.usgov.coderdemo.io`, TLS terminated upstream at the NLB). |
 
 Disabled to keep the demo lean and cut image mirroring: Alertmanager,
@@ -37,6 +40,8 @@ at the mirror:
 - `quay/prometheus-operator/prometheus-config-reloader:v0.91.0`
 - `docker-hub/grafana/grafana:13.0.1-security-01`
 - `quay/kiwigrid/k8s-sidecar:2.7.3`
+- `docker-hub/grafana/loki:3.5.9`
+- `docker-hub/grafana/promtail:3.5.9`
 
 ## The scrape path
 
@@ -61,10 +66,43 @@ Provisioners, Coder Workspaces, and Coder Workspace Detail. Every panel targets
 datasource uid `prometheus`, which the kube-prometheus-stack Grafana
 auto-provisions and marks default.
 
-The purely log-based `agent-boundaries` dashboard is omitted, and a few log
-panels inside the workspaces / provisionerd / workspace-detail dashboards show
-no data, because this stack ships metrics only (no Loki). Their Prometheus
-panels render live.
+The purely log-based `agent-boundaries` dashboard is omitted. The log panels in
+the workspaces / provisionerd / workspace-detail dashboards target datasource
+uid `loki`, which the in-cluster Loki + Promtail stack (below) backs through
+`loki-datasource.yaml`, so they resolve and query live log data instead of
+erroring.
+
+The `coder-status` dashboard's "Observability Tools" row originally came from the
+upstream coder/observability LGTM reference and checked components this demo does
+not run (distributed Loki read/write/backend/canary, Grafana Agent, config
+reloaders, Prometheus storage, CPU, RAM). It was replaced with `up` panels for
+the components this stack actually runs: Prometheus, the single-binary Loki, and
+Promtail. The same dashboard's "Workspace Builds" panel was repointed to
+`coderd_workspace_latest_build_status` (the previous
+`coderd_provisionerd_job_timings_seconds_count` has no series here), and its
+"Postgres" panel to a boolean over `coderd_db_tx_duration_seconds` (there is no
+postgres_exporter, so `pg_up` never existed).
+
+## The logging path
+
+1. A `promtail` DaemonSet runs on every node and tails the real container log
+   files under `/var/log/pods` (containerd on EKS), discovering pods with the
+   Kubernetes `pod` service-discovery role. It attaches `namespace`, `pod`,
+   `container`, `app`, and `node_name` labels and pushes batches to
+   `http://loki.monitoring.svc:3100/loki/api/v1/push`. There is no namespace
+   filter, so all workload namespaces (`coder`, `coder-workspaces`, `gitlab`,
+   `keycloak`, `monitoring`, `external-secrets`, and the rest) are captured.
+2. `loki` runs as a single binary (`-target=all`, in-memory ring,
+   `replication_factor: 1`) with filesystem object storage and a tsdb shipper on
+   a 10Gi gp3 PVC. `auth_enabled` is false (single tenant, in-cluster only) and
+   the compactor enforces ~168h retention.
+3. `loki-datasource.yaml` provisions a Grafana datasource with uid exactly
+   `loki`. The generated Coder dashboards reference that uid on their log panels,
+   so creating it wires those panels to the live store. `isDefault` stays false
+   so Prometheus remains the default datasource.
+4. `ServiceMonitor/loki` and `ServiceMonitor/promtail` let Prometheus scrape both
+   components' `/metrics`, so `up{job="loki"}` and `up{job="promtail"}` drive the
+   `coder-status` dashboard's Loki and Promtail panels.
 
 ## Single sign-on (Keycloak)
 
@@ -134,6 +172,14 @@ helm install kps ~/.cache/helm/repository/kube-prometheus-stack-86.2.0.tgz \
 kubectl apply -f deploy/observability/coder-metrics.yaml
 kubectl apply -f deploy/observability/grafana-ingress.yaml
 kubectl apply -f deploy/observability/dashboards-coder.yaml
+
+# 7. Logging stack: Loki, Promtail, and the Grafana Loki datasource.
+#    The images were mirrored by step 1 (they are in scripts/images.txt).
+kubectl apply -f deploy/observability/loki.yaml
+kubectl -n monitoring rollout status deploy/loki
+kubectl apply -f deploy/observability/promtail.yaml
+kubectl apply -f deploy/observability/loki-datasource.yaml
+kubectl -n monitoring rollout status ds/promtail
 ```
 
 To regenerate `dashboards-coder.yaml` from upstream, extract the
@@ -157,4 +203,17 @@ curl -s -u "admin:$GPW" 'https://grafana.usgov.coderdemo.io/api/search?type=dash
 # Keycloak SSO button + redirect (client_id=grafana, PKCE)
 curl -s https://grafana.usgov.coderdemo.io/login | grep -o '"oauth":{[^}]*}'
 curl -s -o /dev/null -D - https://grafana.usgov.coderdemo.io/login/generic_oauth | grep -i '^location:'
+
+# Loki ingesting logs (labels + a sample query through a port-forward)
+kubectl -n monitoring port-forward svc/loki 3100:3100 &
+curl -s 'http://localhost:3100/loki/api/v1/labels'
+curl -s -G 'http://localhost:3100/loki/api/v1/query_range' \
+  --data-urlencode 'query={namespace="coder"}' --data-urlencode 'limit=1'
+
+# Loki + Promtail scraped by Prometheus (both 1)
+curl -s 'http://localhost:9090/api/v1/query?query=up{job="loki"}'
+curl -s 'http://localhost:9090/api/v1/query?query=up{job="promtail"}'
+
+# Loki datasource present in Grafana with uid loki
+curl -s -u "admin:$GPW" 'https://grafana.usgov.coderdemo.io/api/datasources/uid/loki'
 ```

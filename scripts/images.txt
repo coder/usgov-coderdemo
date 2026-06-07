@@ -33,3 +33,12 @@ quay.io/prometheus-operator/prometheus-operator:v0.91.0
 quay.io/prometheus-operator/prometheus-config-reloader:v0.91.0
 docker.io/grafana/grafana:13.0.1-security-01
 quay.io/kiwigrid/k8s-sidecar:2.7.3
+
+# --- Logging stack (deploy/observability) ---
+# In-cluster logs: single-binary Grafana Loki plus a node-level Promtail
+# collector DaemonSet. Both pinned to the 3.5 release line (released in
+# lockstep). Loki persists on a filesystem PVC; Promtail tails /var/log/pods
+# and pushes to Loki. Referenced from manifests as the ECR mirror path
+# docker-hub/grafana/loki and docker-hub/grafana/promtail.
+docker.io/grafana/loki:3.5.9
+docker.io/grafana/promtail:3.5.9

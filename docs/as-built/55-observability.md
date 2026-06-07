@@ -1,13 +1,15 @@
 # 55. Observability (as-built)
 
-In-boundary, in-cluster metrics and dashboards for the GovCloud demo: the
+In-boundary, in-cluster metrics, logs, and dashboards for the GovCloud demo: the
 `prometheus-community/kube-prometheus-stack` Helm release `kps` (Prometheus +
 Grafana + the Prometheus operator) in the `monitoring` namespace, scraping the
 Coder control plane's Prometheus metrics and rendering Coder's prebuilt Grafana
-dashboards with live data at `https://grafana.usgov.coderdemo.io`. Grafana signs
-in through the same Keycloak realm (`coder`) as the rest of the stack, so the
-demo is one SSO. Coder audit logging is entitled and on; structured JSON server
-logs make it SIEM-ready.
+dashboards with live data at `https://grafana.usgov.coderdemo.io`. Alongside it,
+hand-rolled manifests add an in-cluster Grafana Loki and a Promtail DaemonSet
+that collects pod logs from every node, queried in Grafana through a `loki`
+datasource. Grafana signs in through the same Keycloak realm (`coder`) as the
+rest of the stack, so the demo is one SSO. Coder audit logging is entitled and
+on; structured JSON server logs make it SIEM-ready and are shipped to Loki.
 
 This is the reliable in-cluster implementation. The AWS-native managed variant
 (Amazon Managed Prometheus / Grafana, Security Lake) is planned separately and
@@ -116,10 +118,11 @@ has series (cAdvisor).
   `sum by(pod) (rate(coderd_api_requests_processed_total{...}[5m]))` returns a
   series, and `up{job="coder-metrics"}` returns `1`. So the main dashboard
   renders live data end to end (Grafana to Prometheus to coderd).
-- The purely log-based `agent-boundaries` dashboard is omitted, and a few log
-  panels inside the workspaces / provisionerd / workspace-detail dashboards show
-  no data, because this stack ships metrics only (no Loki). Their Prometheus
-  panels render live.
+- The purely log-based `agent-boundaries` dashboard is omitted. The log panels in
+  the workspaces / provisionerd / workspace-detail dashboards target datasource
+  uid `loki`, which the in-cluster Loki + Promtail stack backs through
+  `loki-datasource.yaml` (see "Logging" below), so they resolve and query live
+  log data instead of erroring.
 
 ### Single sign-on (Keycloak OIDC)
 
@@ -170,6 +173,94 @@ Verified live: ExternalSecret `grafana-admin` is `Ready=True` reason
 `SecretSynced`; the Secret carries keys `admin-user` and `admin-password`; and
 logging in to the public Grafana with that password succeeds.
 
+## Logging (Loki + Promtail)
+
+Hand-rolled manifests in `deploy/observability/` add an in-cluster log store and
+collector next to the metrics stack. They are plain Kubernetes objects (not part
+of the `kps` Helm release) and use ECR-mirrored images.
+
+| Component | Live object | Storage |
+|---|---|---|
+| Loki | Deployment `loki` (single binary, `-target=all`), Service `loki:3100` | 10Gi gp3 PVC `loki-data` |
+| Promtail | DaemonSet `promtail` (one pod per node) | host `/var/log` read-only + host `/var/lib/promtail` positions |
+
+Images (mirrored via `scripts/images.txt` + `scripts/mirror-images.sh`):
+
+- `docker-hub/grafana/loki:3.5.9`
+- `docker-hub/grafana/promtail:3.5.9`
+
+Loki (`loki.yaml`) runs monolithic: `auth_enabled: false`, an in-memory ring with
+`replication_factor: 1`, filesystem object storage, and a tsdb shipper with
+schema `v13`. The compactor enforces ~168h (7d) retention. Everything lives under
+`/loki` on the PVC. The container runs as the image's nonroot user (uid 10001),
+and the Deployment uses the `Recreate` strategy because the data sits on a single
+ReadWriteOnce volume.
+
+Promtail (`promtail.yaml`) runs as a DaemonSet under a ServiceAccount with a
+ClusterRole granting read access to pods/nodes/services/endpoints for Kubernetes
+service discovery. It tails the real container log files under `/var/log/pods`
+(containerd on EKS) with the `pod` SD role, attaches `namespace`, `pod`,
+`container`, `app`, and `node_name` labels, and pushes to
+`http://loki.monitoring.svc:3100/loki/api/v1/push`. There is no namespace filter,
+so every workload namespace is captured. Verified live: Loki's
+`/loki/api/v1/labels` returns `app`, `container`, `namespace`, `node_name`,
+`pod`, ...; `/loki/api/v1/label/namespace/values` lists `coder`,
+`coder-workspaces`, `gitlab`, `keycloak`, `monitoring`, and `external-secrets`
+(plus `ingress-nginx` and `kube-system`); and a `{namespace="coder"}`
+`query_range` returns coderd JSON log lines (including `msg:"audit_log"`).
+
+### Grafana Loki datasource (how the log panels are powered)
+
+The kube-prometheus-stack Grafana runs the kiwigrid sidecar with
+`sidecar.datasources.enabled: true`, which provisions any ConfigMap labelled
+`grafana_datasource: "1"` as a datasource. `loki-datasource.yaml` is that
+ConfigMap: it defines a Loki datasource with `access: proxy`, URL
+`http://loki.monitoring.svc:3100`, `isDefault: false`, and uid EXACTLY `loki`. No
+Helm upgrade is needed.
+
+That uid is a contract: the generated Coder dashboards (`dashboards-coder.yaml`)
+reference datasource uid `loki` on their log panels, the workspace-detail "Logs"
+panel and the provisionerd / workspaces "Logs" panels. Before this datasource
+existed those panels errored ("datasource loki not found"); creating it with the
+matching uid resolves them. Verified live: `GET /api/datasources` lists `Loki`
+(type `loki`, uid `loki`, default false); a labels call and a `{namespace="coder"}`
+`query_range` through the Grafana datasource proxy
+(`/api/datasources/proxy/uid/loki/...`) both return `success` with log lines; and
+`POST /api/ds/query` for the workspace-detail `{namespace="coder-workspaces"}`
+query returns HTTP 200 with log frames.
+
+The workspaces / provisionerd "Logs" panels additionally filter on a `logger`
+label that Promtail does not emit, so they resolve but are legitimately empty;
+the workspace-detail panel that matches `coder-workspaces` pods returns live
+workspace logs.
+
+### Prometheus scraping of Loki and Promtail
+
+`loki.yaml` and `promtail.yaml` each ship a `ServiceMonitor` (selected because
+`serviceMonitorSelectorNilUsesHelmValues: false`), so Prometheus scrapes their
+`/metrics`. Verified live: `up{job="loki"}` is `1` and `min(up{job="promtail"})`
+is `1` (one target per node). These drive the `coder-status` dashboard's Loki and
+Promtail panels below.
+
+## coder-status dashboard adaptation
+
+The `coder-status` dashboard (`coder-dashboard-status` in `dashboards-coder.yaml`,
+uid `coder-status`) shipped an "Observability Tools" row copied from the upstream
+coder/observability LGTM reference. That row probed components this demo does not
+run, so most tiles were permanently red or empty. It was rebuilt to reflect this
+stack, and two unrelated broken panels were repointed at metrics that exist here:
+
+| Panel | Before | After |
+|---|---|---|
+| Observability Tools row | Loki Write/Read/Backend/Canary, Grafana Agent, Prometheus/Loki/Grafana-Agent config reload, Prometheus Storage, CPU, RAM | Three `up` stat panels: Prometheus (`up{job="kps-kube-prometheus-stack-prometheus"}`), Loki (`up{job="loki"}`), Promtail (`up{job="promtail"}`) |
+| Workspace Builds | `coderd_provisionerd_job_timings_seconds_count` (no series here, so "No data") | `sum by (status) (coderd_workspace_latest_build_status)` |
+| Postgres | `pg_up` (no postgres_exporter, so "Down") | `(sum(rate(coderd_db_tx_duration_seconds_count[5m])) > bool 0) or vector(0)` |
+
+Verified live through Grafana `POST /api/ds/query`: all five changed panels return
+HTTP 200; the three `up` panels and Postgres each evaluate to `1`, and Workspace
+Builds returns `1` for `status="succeeded"`. The header comment in
+`dashboards-coder.yaml` documents this adaptation.
+
 ## Ingress (HTTPS)
 
 `deploy/observability/grafana-ingress.yaml` follows the platform pattern
@@ -211,8 +302,12 @@ forever).
 
 ## Notes and known gaps
 
-- Metrics only: no Loki/logs datasource, so log-based panels and the
-  `agent-boundaries` dashboard are inactive by design.
+- In-cluster logs are present: a single-binary Loki plus a Promtail DaemonSet
+  back the `loki` datasource, so the log-based panels resolve. The
+  `agent-boundaries` dashboard is still omitted (it is purely log-based and was
+  not part of the dashboard set shipped here). The workspaces / provisionerd
+  "Logs" panels filter on a `logger` label Promtail does not emit, so they are
+  legitimately empty while error-free.
 - kube-state-metrics is disabled, so the dashboards' pod resource limit/request
   and restart/terminated-reason panels (which depend on `kube_pod_*`) stay
   empty; container CPU/memory usage panels (cAdvisor via the kubelet) render.

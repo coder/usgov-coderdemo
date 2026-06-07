@@ -183,7 +183,7 @@ gated; Nova Pro is the proven fallback.
       `terraform/secrets-hardening.tf`.
 - See `docs/as-built/85-secrets-management.md`.
 
-## Observability (in-cluster Prometheus + Grafana)
+## Observability (in-cluster Prometheus + Grafana + Loki)
 - [x] **In-boundary metrics + dashboards** via the
       `prometheus-community/kube-prometheus-stack` Helm release `kps` (ns
       `monitoring`, ECR-mirrored images). Prometheus (2/2), Grafana (3/3), and
@@ -196,6 +196,25 @@ gated; Nova Pro is the proven fallback.
       render live data at `https://grafana.usgov.coderdemo.io` (valid TLS,
       HTTP 200). Grafana admin password lives in AWS Secrets Manager
       (`usgov-coderdemo/observability/grafana`) and is synced by ESO.
+- [x] **In-cluster logs via Loki + Promtail** (hand-rolled manifests
+      `deploy/observability/loki.yaml` + `promtail.yaml`, ECR-mirrored
+      `grafana/loki:3.5.9` and `grafana/promtail:3.5.9`). Single-binary Loki
+      stores on a 10Gi gp3 PVC (filesystem, tsdb schema v13, 168h retention); a
+      Promtail DaemonSet tails `/var/log/pods` on every node and pushes pod logs
+      to `loki.monitoring.svc:3100`, covering namespaces `coder`,
+      `coder-workspaces`, `gitlab`, `keycloak`, `monitoring`, and
+      `external-secrets`. A Grafana datasource ConfigMap
+      (`deploy/observability/loki-datasource.yaml`, uid `loki`) provisions it via
+      the sidecar, so the Coder dashboards' log panels (workspace-detail "Logs",
+      provisionerd, workspaces) resolve instead of showing a datasource error.
+      Prometheus scrapes both (`up{job="loki"}` and `up{job="promtail"}` are
+      `1`).
+- [x] **`coder-status` dashboard adapted to this stack**: the upstream
+      "Observability Tools" row (distributed Loki, Grafana Agent, config
+      reloaders, storage/CPU/RAM) was replaced with Prometheus, Loki, and
+      Promtail `up` panels; "Workspace Builds" repointed to
+      `coderd_workspace_latest_build_status` and "Postgres" to a real
+      `coderd_db_tx_duration_seconds` signal (no postgres_exporter runs).
 - [x] **Grafana Keycloak SSO (one SSO)**: Grafana signs in via the same realm
       (`coder`) through a confidential OIDC client `grafana`
       (`scripts/setup-grafana-oidc.py`, PKCE; secret in ASM
@@ -205,7 +224,8 @@ gated; Nova Pro is the proven fallback.
       (`austen.platform` Admin, `dana.dev` Viewer).
 - [x] **Structured JSON server logs** (`CODER_LOGGING_JSON=/dev/stderr`,
       `CODER_LOGGING_HUMAN=/dev/null`) make coderd SIEM-ready; audit logging is
-      entitled + on (`/audit`).
+      entitled + on (`/audit`). Promtail also ships these lines to the
+      in-cluster Loki, so they are queryable in Grafana.
 - [ ] AWS-native managed variant (AMP + AMG, CloudWatch -> Security Lake) is the
       production target, planned only. See
       [`docs/plans/observability-aws-native.md`](docs/plans/observability-aws-native.md)
