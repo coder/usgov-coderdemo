@@ -13,6 +13,7 @@
 #
 # Env (with sane demo defaults):
 #   DEMO_CODER_URL       default https://dev.usgov.coderdemo.io
+#   APP_NAME             default "USGOV Coder Demo"
 #   BANNER_MESSAGE       default "UNCLASSIFIED - USGOVCLOUD"
 #   BANNER_COLOR         default "#007a33"  (IC/DoD UNCLASSIFIED green)
 # Admin creds are read from ~/.config/usgov-coderdemo/generated-secrets.env.
@@ -24,6 +25,7 @@
 set -euo pipefail
 
 export CODER_URL="${DEMO_CODER_URL:-https://dev.usgov.coderdemo.io}"
+export APP_NAME="${APP_NAME:-USGOV Coder Demo}"
 export BANNER_MESSAGE="${BANNER_MESSAGE:-UNCLASSIFIED - USGOVCLOUD}"
 export BANNER_COLOR="${BANNER_COLOR:-#007a33}"
 SECRETS="${HOME}/.config/usgov-coderdemo/generated-secrets.env"
@@ -62,7 +64,7 @@ _, login = call("POST", "/api/v2/users/login", {
 token = login["session_token"]
 
 call("PUT", "/api/v2/appearance", {
-    "application_name": "",
+    "application_name": os.environ["APP_NAME"],
     "logo_url": "",
     "service_banner": {"enabled": False},
     "announcement_banners": [{
@@ -73,5 +75,6 @@ call("PUT", "/api/v2/appearance", {
 }, token=token)
 
 status, appearance = call("GET", "/api/v2/appearance", token=token)
+print("application_name:", json.dumps(appearance.get("application_name")))
 print("appearance set:", json.dumps(appearance["announcement_banners"]))
 PY
