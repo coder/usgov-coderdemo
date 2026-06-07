@@ -164,53 +164,33 @@ This matches `deploy/coder/values.yaml` exactly.
 - Boundary hardening: GitHub default login disabled, so no github.com login
   egress.
 
-### NOT configured (known gap): IdP group sync and role mapping
+### IdP organization, group, and role sync (CONFIGURED)
 
-There is no Keycloak-to-Coder group sync or role mapping. This is a deliberate,
-documented gap (see also `STATUS.md` "Out of scope: full identity sync" and the
-facts sheet). Evidence from the live `GET /api/v2/deployment/config` `oidc`
-block on the demo Coder:
+Keycloak-to-Coder sync is now wired and verified. Organization sync, group sync,
+and role sync all read a single full-path `groups` claim that a Group Membership
+mapper on the `coder` client emits. See
+[45-idp-sync-personas.md](45-idp-sync-personas.md) for the full hierarchy,
+persona matrix, and verification.
 
-```
-groups_field      = ""        (no claim is read for group membership)
-group_mapping     = {}        (no OIDC-group -> Coder-group mapping)
-group_auto_create = false     (Coder will not create groups from claims)
-user_role_field   = ""        (no claim is read for site roles)
-user_role_mapping = {}        (no OIDC-claim -> Coder-role mapping)
-group_regex_filter = ".*"     (default; inert because groups_field is empty)
-group_allow_list  = null      (default)
-```
+High-level:
 
-On the Keycloak side, the realm `coder` has no groups and no group-claim mapper:
-`realm-coder.json` defines no `groups`/`defaultGroups` and no
-`protocolMappers`, so even if Coder read a `groups` field there is currently no
-`groups` claim emitted in the token.
+1. Keycloak realm `coder` has a hierarchical group tree (`/platform`, `/alpha`,
+   `/bravo` with team and role subgroups) and 8 persona users, created by
+   `scripts/setup-keycloak-hierarchy.py`. The `coder` client emits the
+   `groups` claim (full path; ID + access + userinfo).
+2. Coder runs runtime IdP sync (not the legacy `CODER_OIDC_*` env vars):
+   organization sync (`field=groups`, `organization_assign_default=false`),
+   per-org group sync, and per-org role sync mapping to `organization-admin`,
+   `organization-template-admin`, and `organization-auditor`. Configured by
+   `scripts/setup-coder-idp-sync.py`.
 
-Net effect: all SSO users land as ordinary members of the default Coder
-organization. Group membership and site roles are managed manually inside
-Coder, not driven by the IdP.
+The legacy deployment-config keys (`groups_field`, `user_role_field`, etc.)
+remain empty on purpose: this deployment uses the runtime per-org IdP sync
+settings instead, which are required for multi-organization sync.
 
-### What enabling group sync would require (future work, not implemented)
-
-Documentation only. Do not implement as part of this as-built pass. To wire
-Keycloak group sync into Coder you would need all of:
-
-1. Keycloak: create the groups in realm `coder` (and assign users), then add a
-   "Group Membership" protocol mapper (on a client scope or the `coder` client)
-   that emits a `groups` claim in the token. Decide whether the claim is full
-   group paths or names.
-2. Coder: set `CODER_OIDC_GROUP_FIELD` (the deployment-config key surfaces as
-   `groups_field`) to the claim name, for example `groups`. Optionally set
-   `CODER_OIDC_GROUP_MAPPING` to translate IdP group names to Coder group IDs,
-   and `CODER_OIDC_GROUP_AUTO_CREATE=true` if Coder should create missing
-   groups. `CODER_OIDC_GROUP_REGEX_FILTER` can scope which groups are honored.
-3. For site-role sync (separate from groups): add a realm/role mapper that emits
-   a roles claim, then set `CODER_OIDC_USER_ROLE_FIELD` and
-   `CODER_OIDC_USER_ROLE_MAPPING` on Coder.
-
-Note: OIDC-driven group and role sync is a Coder premium/enterprise capability.
-This deployment is licensed (premium + AI Governance per `STATUS.md`), so the
-gating is configuration effort, not licensing. None of the above is wired today.
+Net effect: SSO users are placed into the correct Coder organization(s), groups,
+and roles automatically on login, with no manual assignment. Tenant isolation
+(Alpha vs Bravo vs Platform) is enforced by organization membership.
 
 ## Sources
 

@@ -15,7 +15,8 @@ docs explain the *how* and *why* behind that status.
 | [10-infrastructure.md](10-infrastructure.md) | AWS GovCloud substrate: account/region/partition, VPC, EKS (standard, not Auto Mode, and why), node group, IRSA roles, RDS, ECR, Route53, ACM, NLB. |
 | [20-platform-kubernetes.md](20-platform-kubernetes.md) | Kubernetes platform layer: namespaces, ingress-nginx + load-balancer-controller, `gp3` StorageClass, workspace RBAC, platform-owned Secrets. |
 | [30-coder-control-plane.md](30-coder-control-plane.md) | Coder v2.34.0 control plane: a section-by-section walkthrough of `deploy/coder/values.yaml`, OIDC SSO, auth-boundary hardening, licensing, appearance. |
-| [40-identity-keycloak.md](40-identity-keycloak.md) | Keycloak realm `coder`, the OIDC client, the SSO wiring, and the configured-vs-not gap (no group/role sync). |
+| [40-identity-keycloak.md](40-identity-keycloak.md) | Keycloak realm `coder`, the OIDC client, the SSO wiring, and IdP sync status. |
+| [45-idp-sync-personas.md](45-idp-sync-personas.md) | Multi-tenant org/group/role hierarchy, the persona users, and the verified Keycloak-to-Coder IdP sync (org + group + role). |
 | [50-gitlab-scm.md](50-gitlab-scm.md) | In-boundary GitLab SCM, the instance-wide OAuth app, and how every workspace authenticates git against it. |
 | [60-ai-gateway.md](60-ai-gateway.md) | AI Gateway / AI Bridge: DB-managed providers (`anthropic` direct + `anthropic-bedrock` IRSA), name-based routing, the end-to-end request flow, and the remaining action to make AI respond. |
 | [70-workspace-templates.md](70-workspace-templates.md) | The `claude-code` workspace template: pod/PVC, the claude-code module (4.7.3), Coder Tasks, parameters, and the required GitLab external auth. |

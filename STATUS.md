@@ -118,5 +118,22 @@ gated; Nova Pro is the proven fallback.
       reproduce with `scripts/set-appearance.sh` (idempotent). Verified via
       `GET /api/v2/appearance`.
 
+## Identity / multi-tenancy (Keycloak -> Coder IdP sync)
+- [x] **3 Coder organizations**: `coder` (display "Platform Engineering"),
+      `alpha` ("Mission Partner Alpha"), `bravo` ("Mission Partner Bravo").
+- [x] **Org + group + role sync** from a single full-path `groups` OIDC claim
+      (Group Membership mapper on the `coder` client). `assign_default=false`;
+      runtime per-org IdP sync (not legacy env vars). Configured by
+      `scripts/setup-keycloak-hierarchy.py` + `scripts/setup-coder-idp-sync.py`
+      (both idempotent).
+- [x] **8 persona users** in realm `coder` (platform lead, SRE/template-admin,
+      org admins, developers, data scientist, cross-tenant ISSO/auditor).
+- [x] **Verified end to end** with `scripts/verify-oidc-login.py`: each persona
+      lands in the right org(s)/group(s)/role(s); tenant isolation holds.
+- [x] **Tenant provisioners + templates**: external provisioner daemon per
+      tenant org (`deploy/coder/provisioners.yaml`, org-scoped keys) + the
+      `claude-code` template pushed into all three orgs.
+- See `docs/as-built/45-idp-sync-personas.md` for the full hierarchy + matrix.
+
 ## Out of scope (demo)
-OpenShift, Istio, observability, full identity sync.
+OpenShift, Istio, observability.
