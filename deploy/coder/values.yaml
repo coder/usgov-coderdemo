@@ -106,6 +106,47 @@ coder:
     - name: CODER_OIDC_SIGN_IN_TEXT
       value: "Sign in with Keycloak"
 
+    # --- Auth boundary hardening ------------------------------------------
+    # Coder enables a built-in GitHub login + GitHub external-auth provider by
+    # default (Coder's own hosted GitHub app), both of which call github.com,
+    # i.e. OUT of the GovCloud boundary. Disable it so login is Keycloak-only
+    # (plus the local password owner) and git stays on the in-cluster GitLab.
+    - name: CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE
+      value: "false"
+
+    # --- Git external auth: in-cluster GitLab (in-boundary) ----------------
+    # Authenticates git operations inside workspaces against the in-cluster
+    # GitLab via an instance-wide OAuth app (minted in GitLab; id/secret live
+    # in Secret `coder-external-auth`). Configuring an explicit external-auth
+    # provider also SUPPRESSES Coder's built-in github.com default provider.
+    # Self-managed GitLab needs explicit auth/token/validate URLs.
+    - name: CODER_EXTERNAL_AUTH_0_ID
+      value: "gitlab"
+    - name: CODER_EXTERNAL_AUTH_0_TYPE
+      value: "gitlab"
+    - name: CODER_EXTERNAL_AUTH_0_DISPLAY_NAME
+      value: "GitLab"
+    - name: CODER_EXTERNAL_AUTH_0_CLIENT_ID
+      valueFrom:
+        secretKeyRef:
+          name: coder-external-auth
+          key: gitlab-client-id
+    - name: CODER_EXTERNAL_AUTH_0_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: coder-external-auth
+          key: gitlab-client-secret
+    - name: CODER_EXTERNAL_AUTH_0_AUTH_URL
+      value: "https://gitlab.usgov.coderdemo.io/oauth/authorize"
+    - name: CODER_EXTERNAL_AUTH_0_TOKEN_URL
+      value: "https://gitlab.usgov.coderdemo.io/oauth/token"
+    - name: CODER_EXTERNAL_AUTH_0_VALIDATE_URL
+      value: "https://gitlab.usgov.coderdemo.io/oauth/token/info"
+    - name: CODER_EXTERNAL_AUTH_0_REGEX
+      value: "gitlab\\.usgov\\.coderdemo\\.io"
+    - name: CODER_EXTERNAL_AUTH_0_SCOPES
+      value: "read_user read_repository write_repository"
+
     # --- AI Gateway (AI Governance Add-On) --------------------------------
     # AI Gateway is enabled by default in v2.34; set explicitly for clarity.
     # NOTE: provider env vars are deprecated and seed the DB ONCE. After the

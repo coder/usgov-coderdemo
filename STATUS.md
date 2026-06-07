@@ -87,5 +87,16 @@ gated; Nova Pro is the proven fallback.
 5. ingress-nginx + aws-load-balancer-controller (Helm) replacing the Auto Mode NLB path.
 6. Workspace RBAC: `deploy/platform/workspace-rbac.yaml` (coder SA -> coder-workspaces ns).
 
+## Auth boundary hardening
+- [x] Disabled Coder's built-in **GitHub login** default provider
+      (`CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE=false`). Login is now
+      Keycloak SSO + local password owner only (no github.com egress).
+- [x] Configured **GitLab external auth** for git-in-workspaces against the
+      in-cluster GitLab (instance-wide OAuth app; id/secret in Secret
+      `coder-external-auth`). This also suppresses Coder's default github.com
+      external-auth provider, so no auth path leaves the GovCloud boundary.
+      (App id/secret recorded in `generated-secrets.env` as
+      `GITLAB_CODER_OAUTH_*`.)
+
 ## Out of scope (demo)
 OpenShift, Istio, observability, full identity sync.
