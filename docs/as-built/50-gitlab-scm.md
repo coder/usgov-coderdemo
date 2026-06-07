@@ -155,11 +155,51 @@ clone/fetch/push to `gitlab.usgov.coderdemo.io`, so no PATs or SSH keys live in
 the workspace. `STATUS.md` records this as verified: the active template
 version's `/external-auth` lists `gitlab` as required.
 
+## Keycloak SSO (OpenID Connect)
+
+GitLab signs in through the same Keycloak realm (`coder`) as Coder and Grafana,
+so the demo is one SSO. The OmniAuth `openid_connect` provider is configured in
+`GITLAB_OMNIBUS_CONFIG` (`deploy/gitlab/statefulset.yaml`):
+
+- Confidential realm client `gitlab` (PKCE S256, redirect
+  `https://gitlab.usgov.coderdemo.io/users/auth/openid_connect/callback`),
+  created by `scripts/setup-gitlab-oidc.py`. The client secret lives in AWS
+  Secrets Manager (`usgov-coderdemo/gitlab/oidc`), is synced by ESO into the
+  `gitlab-oidc` Secret, and is injected as `GITLAB_OIDC_CLIENT_SECRET`
+  (referenced as `ENV[...]` in the omnibus config), so no secret is in git.
+- Auto sign-on (JIT) creates the GitLab user on first Keycloak login;
+  `uid_field` is `preferred_username`. Auto-redirect is deliberately NOT set, so
+  the local username/password form stays available as break-glass for root.
+
+Verified live: the sign-in page shows a "Keycloak" button; the OmniAuth request
+phase redirects to the realm with `client_id=gitlab` and PKCE; a headless
+authorization-code login provisions the persona and returns to the dashboard.
+
+### Roles: CE limitation and explicit user provisioning
+
+GitLab **Community Edition does not implement OIDC group-to-role assignment**.
+`admin_groups` / `required_groups` / `external_groups` are EE features; this CE
+image (`gitlab-ce` 19.0.1, no `ee/` directory) ships only the SAML and LDAP
+equivalents with no `openid_connect` code path, so the `admin_groups` line in the
+omnibus config is a no-op (kept only so it activates if the image is ever
+switched to GitLab EE). Per-group membership/roles is impossible on either
+edition without SAML Group Sync (a Premium feature).
+
+Because of that, the persona users and the instance admin attribute are
+provisioned explicitly by `scripts/setup-gitlab-users.py` (idempotent,
+`gitlab-rails`): it creates the eight personas from
+`scripts/setup-keycloak-hierarchy.py`, links each to its `openid_connect`
+identity (`extern_uid = preferred_username`) so SSO lands on the right account,
+and sets GitLab instance admin only on `pat.platform` (the Platform lead),
+mirroring the Coder org-admin mapping while keeping tenant isolation. Verified
+live: `pat.platform` SSO login is `is_admin=true` (`/admin` returns 200);
+`dana.dev` is a regular user (`/admin` returns 404).
+
 ## Notes and out of scope
 
-- GitLab to Keycloak SSO (OIDC) is optional and NOT enabled. `deploy/gitlab/README.md`
-  includes an `openid_connect` omniauth sketch, but the as-built login is root
-  plus local GitLab users.
+- GitLab to Keycloak SSO (OIDC) is now ENABLED (see "Keycloak SSO" above).
+  GitLab CE has no OIDC group-to-role mapping, so the instance admin attribute
+  is provisioned by `scripts/setup-gitlab-users.py`, not by group claims.
 - Git over SSH is not wired (NLB terminates 443 only). HTTPS clone/push is the
   supported path.
 - Backups: with embedded Postgres there is no managed backup; durability relies

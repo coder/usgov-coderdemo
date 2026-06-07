@@ -135,6 +135,24 @@ gated; Nova Pro is the proven fallback.
       `claude-code` template pushed into all three orgs.
 - See `docs/as-built/45-idp-sync-personas.md` for the full hierarchy + matrix.
 
+## Single sign-on + demo super admin
+- [x] **One SSO across the stack**: Coder, GitLab, and Grafana all authenticate
+      against the Keycloak realm `coder`. Grafana via generic OAuth
+      (`scripts/setup-grafana-oidc.py`); GitLab via OmniAuth `openid_connect`
+      (`scripts/setup-gitlab-oidc.py`, in `deploy/gitlab/statefulset.yaml`).
+- [x] **GitLab CE caveat**: CE has no OIDC group-to-role mapping (an EE
+      feature), so GitLab persona users + the instance admin attribute are
+      provisioned explicitly by `scripts/setup-gitlab-users.py`
+      (`pat.platform` -> admin; others regular).
+- [x] **Unified super admin**: the SSO identity `pat.platform` is super admin in
+      all three (Coder site Owner via `scripts/grant-coder-owner.py`, GitLab
+      Administrator, Grafana org Admin). Sign in with "Keycloak" on each.
+- [x] **Local break-glass admins** remain per app (Coder owner, GitLab root,
+      Grafana admin). Credentials live in
+      `~/.config/usgov-coderdemo/generated-secrets.env` and AWS Secrets Manager
+      (`usgov-coderdemo/gitlab/secrets` `root_password`,
+      `usgov-coderdemo/observability/grafana`); none are committed to git.
+
 ## Secrets management (ESO + AWS Secrets Manager)
 - [x] **AWS Secrets Manager is the source of truth** for the 9 runtime app
       secrets (`usgov-coderdemo/{coder,keycloak,gitlab}/*`). No secret material

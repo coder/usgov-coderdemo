@@ -72,6 +72,15 @@ spec:
                   # optional so the pod still starts on later restarts (after the
                   # first boot the root password lives in the database, not here).
                   optional: true
+            # Keycloak OIDC client secret, ESO-synced from AWS Secrets Manager
+            # (usgov-coderdemo/gitlab/oidc). Referenced as ENV[...] inside the
+            # omniauth block below so no secret is written into this manifest.
+            - name: GITLAB_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: gitlab-oidc
+                  key: client-secret
+                  optional: true
             - name: GITLAB_OMNIBUS_CONFIG
               value: |-
                 external_url 'https://gitlab.usgov.coderdemo.io'
@@ -101,6 +110,57 @@ spec:
                 ## gitlab-secrets Secret. Ignored once the DB has a root user.
                 if ENV['GITLAB_INITIAL_ROOT_PASSWORD'] && !ENV['GITLAB_INITIAL_ROOT_PASSWORD'].empty?
                   gitlab_rails['initial_root_password'] = ENV['GITLAB_INITIAL_ROOT_PASSWORD']
+                end
+
+                ## ---- Keycloak SSO (OpenID Connect) ----
+                ## Single sign-on against the same realm (coder) as Coder and
+                ## Grafana. The confidential client `gitlab` is created by
+                ## scripts/setup-gitlab-oidc.py; its secret is injected via the
+                ## GITLAB_OIDC_CLIENT_SECRET env above. Auto sign-on creates the
+                ## GitLab user on first Keycloak login (JIT). We deliberately do
+                ## NOT set auto_sign_in_with_provider, so the local username and
+                ## password form stays available as break-glass for root.
+                ##
+                ## Role mapping: GitLab Community Edition does NOT implement
+                ## OIDC group-to-role assignment. admin_groups / required_groups
+                ## / external_groups are EE features; CE ships only the SAML and
+                ## LDAP equivalents, with no openid_connect code path. The
+                ## admin_groups line below is therefore a NO-OP on this CE image
+                ## and is kept only so it activates automatically if the image is
+                ## ever switched to GitLab EE (Free tier). On CE, the instance
+                ## admin attribute is provisioned explicitly by
+                ## scripts/setup-gitlab-users.py (Platform lead pat.platform).
+                ## Per-group membership/roles is not possible on either edition
+                ## without SAML Group Sync (a Premium feature).
+                if ENV['GITLAB_OIDC_CLIENT_SECRET'] && !ENV['GITLAB_OIDC_CLIENT_SECRET'].empty?
+                  gitlab_rails['omniauth_enabled'] = true
+                  gitlab_rails['omniauth_allow_single_sign_on'] = ['openid_connect']
+                  gitlab_rails['omniauth_block_auto_created_users'] = false
+                  gitlab_rails['omniauth_providers'] = [
+                    {
+                      name: 'openid_connect',
+                      label: 'Keycloak',
+                      args: {
+                        name: 'openid_connect',
+                        scope: ['openid', 'profile', 'email'],
+                        response_type: 'code',
+                        issuer: 'https://auth.usgov.coderdemo.io/realms/coder',
+                        discovery: true,
+                        client_auth_method: 'basic',
+                        uid_field: 'preferred_username',
+                        pkce: true,
+                        client_options: {
+                          identifier: 'gitlab',
+                          secret: ENV['GITLAB_OIDC_CLIENT_SECRET'],
+                          redirect_uri: 'https://gitlab.usgov.coderdemo.io/users/auth/openid_connect/callback',
+                          gitlab: {
+                            groups_attribute: 'groups',
+                            admin_groups: ['/platform/platform-admins', '/platform/org-admins']
+                          }
+                        }
+                      }
+                    }
+                  ]
                 end
 
                 ## Embedded PostgreSQL (bundled) is the default; nothing to set.
