@@ -23,3 +23,13 @@ docker.io/codercom/enterprise-base:ubuntu-noble-20260601
 # --- External Secrets Operator (deploy/platform/external-secrets) ---
 # Controller, webhook, and cert-controller all use this single image.
 ghcr.io/external-secrets/external-secrets:v2.6.0
+
+# --- Observability stack (deploy/observability) ---
+# kube-prometheus-stack 86.2.0 (Prometheus + Grafana + operator), minimal set.
+# Alertmanager, node-exporter, and kube-state-metrics are disabled, so their
+# images are intentionally not mirrored.
+quay.io/prometheus/prometheus:v3.12.0-distroless
+quay.io/prometheus-operator/prometheus-operator:v0.91.0
+quay.io/prometheus-operator/prometheus-config-reloader:v0.91.0
+docker.io/grafana/grafana:13.0.1-security-01
+quay.io/kiwigrid/k8s-sidecar:2.7.3

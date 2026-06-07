@@ -152,5 +152,41 @@ gated; Nova Pro is the proven fallback.
       `terraform/secrets-hardening.tf`.
 - See `docs/as-built/85-secrets-management.md`.
 
+## Observability (in-cluster Prometheus + Grafana)
+- [x] **In-boundary metrics + dashboards** via the
+      `prometheus-community/kube-prometheus-stack` Helm release `kps` (ns
+      `monitoring`, ECR-mirrored images). Prometheus (2/2), Grafana (3/3), and
+      the operator (1/1) are healthy.
+- [x] **Coder Prometheus metrics enabled** (`CODER_PROMETHEUS_ENABLE=true`,
+      `CODER_PROMETHEUS_ADDRESS=0.0.0.0:2112`, agent stats on). A headless
+      `coder-metrics` Service + ServiceMonitor scrapes the control plane;
+      Prometheus `up{job="coder-metrics"}` is `1`.
+- [x] **Six Coder Grafana dashboards** (from `github.com/coder/observability`)
+      render live data at `https://grafana.usgov.coderdemo.io` (valid TLS,
+      HTTP 200). Grafana admin password lives in AWS Secrets Manager
+      (`usgov-coderdemo/observability/grafana`) and is synced by ESO.
+- [x] **Structured JSON server logs** (`CODER_LOGGING_JSON=/dev/stderr`,
+      `CODER_LOGGING_HUMAN=/dev/null`) make coderd SIEM-ready; audit logging is
+      entitled + on (`/audit`).
+- [ ] AWS-native managed variant (AMP + AMG, CloudWatch -> Security Lake) is the
+      production target, planned only. See
+      [`docs/plans/observability-aws-native.md`](docs/plans/observability-aws-native.md)
+      and issues #13-#20.
+- See `docs/as-built/55-observability.md` and `deploy/observability/README.md`.
+
+## Planned (design + issues, nothing applied)
+- [ ] **GitOps control plane** (Argo CD, sourced from the in-cluster GitLab,
+      app-of-apps over the existing `deploy/` paths, adopt-in-place):
+      [`docs/plans/gitops-control-plane.md`](docs/plans/gitops-control-plane.md),
+      issues #6-#12.
+- [ ] **Per-workload GitOps adoption** + non-Kubernetes app state (Coder API via
+      Argo Jobs, Keycloak via keycloak-config-cli, AWS stays Terraform):
+      [`docs/plans/gitops-adoption.md`](docs/plans/gitops-adoption.md),
+      issues #21-#29.
+- [ ] **AWS-native observability** (AMP/AMG, CloudWatch/Firehose/S3/Athena,
+      optional Security Lake):
+      [`docs/plans/observability-aws-native.md`](docs/plans/observability-aws-native.md),
+      issues #13-#20.
+
 ## Out of scope (demo)
-OpenShift, Istio, observability.
+OpenShift, Istio.

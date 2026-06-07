@@ -214,6 +214,31 @@ coder:
     - name: AWS_STS_REGIONAL_ENDPOINTS
       value: "regional"
 
+    # --- Observability: Prometheus metrics --------------------------------
+    # Serve coderd_* and Go runtime metrics so the in-cluster Prometheus can
+    # scrape them. Bind to 0.0.0.0 (not the 127.0.0.1 default) so the metrics
+    # endpoint is reachable from the cluster network; a separate ClusterIP
+    # Service `coder-metrics` (deploy/observability) exposes port 2112 and a
+    # ServiceMonitor scrapes it. COLLECT_AGENT_STATS adds per-workspace agent
+    # metrics (connections, RX/TX, latency) used by the workspace dashboards.
+    - name: CODER_PROMETHEUS_ENABLE
+      value: "true"
+    - name: CODER_PROMETHEUS_ADDRESS
+      value: "0.0.0.0:2112"
+    - name: CODER_PROMETHEUS_COLLECT_AGENT_STATS
+      value: "true"
+
+    # --- Observability: structured (JSON) logs ----------------------------
+    # Emit machine-parseable JSON logs to stderr so the cluster log pipeline
+    # can ship them to a SIEM. The human-readable stream (default /dev/stderr)
+    # is silenced to /dev/null so stderr carries JSON only, avoiding duplicate
+    # log lines. Coder has no single CODER_LOG_FORMAT flag; JSON output is
+    # selected by pointing CODER_LOGGING_JSON at a sink (here, stderr).
+    - name: CODER_LOGGING_HUMAN
+      value: "/dev/null"
+    - name: CODER_LOGGING_JSON
+      value: "/dev/stderr"
+
   # Single replica for the demo. HA (replicaCount > 1) is an Enterprise feature
   # and is out of scope.
   replicaCount: 1

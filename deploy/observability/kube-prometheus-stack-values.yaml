@@ -1,0 +1,164 @@
+# Helm values for prometheus-community/kube-prometheus-stack, pinned to chart
+# 86.2.0 (appVersion / prometheus-operator v0.91.0).
+#
+# Scope: the in-cluster metrics + dashboards stack for the GovCloud demo,
+# installed into the `monitoring` namespace. It scrapes the Coder control
+# plane's /metrics endpoint (via the ServiceMonitor in deploy/observability)
+# and renders Coder's prebuilt Grafana dashboards with live data.
+#
+# Design choices for GovCloud + a lean demo:
+#   - Every image is pulled from the private ECR mirror (no pull-through cache
+#     in GovCloud). Tags match scripts/images.txt.
+#   - Alertmanager, node-exporter, and kube-state-metrics are DISABLED to cut
+#     the image-mirroring surface and footprint. The Coder dashboards' core
+#     panels (coderd_*, up, and cAdvisor CPU/memory from the kubelet) render;
+#     a handful of kube-state-metrics-only panels stay empty by design.
+#   - The managed EKS control-plane ServiceMonitors are disabled (their
+#     endpoints are not scrapeable on EKS and would show as permanently-down
+#     targets). The kubelet ServiceMonitor is kept for container resource
+#     metrics.
+#   - Prometheus and Grafana persist on gp3 PVCs (modest sizes).
+#   - Grafana's admin password comes from a Kubernetes Secret that External
+#     Secrets Operator syncs from AWS Secrets Manager (admin.existingSecret).
+
+crds:
+  enabled: true
+
+# --- Components we do not run (cuts images + footprint) ---------------------
+alertmanager:
+  enabled: false
+nodeExporter:
+  enabled: false
+kubeStateMetrics:
+  enabled: false
+
+# Managed EKS control-plane components are not directly scrapeable; disabling
+# their ServiceMonitors keeps the demo's target list clean. Keep the kubelet so
+# cAdvisor container CPU/memory metrics power the Coder dashboards.
+kubeApiServer:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false
+coreDns:
+  enabled: false
+kubelet:
+  enabled: true
+
+# Bundled alerting rules assume kube-state-metrics / node-exporter; skip them.
+defaultRules:
+  create: false
+windowsMonitoring:
+  enabled: false
+
+# --- Prometheus operator ----------------------------------------------------
+prometheusOperator:
+  # Admission webhooks pull an extra registry.k8s.io cert-gen image that the
+  # ECR mirror script does not handle; disable them (not needed for the demo).
+  admissionWebhooks:
+    enabled: false
+  tls:
+    enabled: false
+  image:
+    registry: 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com
+    repository: quay/prometheus-operator/prometheus-operator
+    tag: v0.91.0
+  prometheusConfigReloader:
+    image:
+      registry: 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com
+      repository: quay/prometheus-operator/prometheus-config-reloader
+      tag: v0.91.0
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+# --- Prometheus -------------------------------------------------------------
+prometheus:
+  prometheusSpec:
+    image:
+      registry: 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com
+      repository: quay/prometheus/prometheus
+      tag: v3.12.0-distroless
+    # Discover ServiceMonitors / PodMonitors / rules regardless of the Helm
+    # release label, across all namespaces. This lets the Coder ServiceMonitor
+    # in the `coder` namespace be selected without extra labels.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    scrapeConfigSelectorNilUsesHelmValues: false
+    retention: 7d
+    resources:
+      requests:
+        cpu: 200m
+        memory: 768Mi
+      limits:
+        memory: 1536Mi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 20Gi
+
+# --- Grafana ----------------------------------------------------------------
+grafana:
+  enabled: true
+  image:
+    registry: 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com
+    repository: docker-hub/grafana/grafana
+    tag: 13.0.1-security-01
+  # Admin credentials from the ESO-synced Secret `grafana-admin` (sourced from
+  # AWS Secrets Manager usgov-coderdemo/observability/grafana).
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  # The bundled Kubernetes dashboards need kube-state-metrics, which is off.
+  defaultDashboardsEnabled: false
+  service:
+    type: ClusterIP
+  # Grafana is exposed through our own Ingress (grafana-ingress.yaml); the NLB
+  # terminates TLS, so set root_url to the public HTTPS host for correct login
+  # redirects.
+  ingress:
+    enabled: false
+  "grafana.ini":
+    server:
+      root_url: https://grafana.usgov.coderdemo.io
+  sidecar:
+    image:
+      registry: 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com
+      repository: quay/kiwigrid/k8s-sidecar
+      tag: 2.7.3
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+    datasources:
+      enabled: true
+  persistence:
+    enabled: true
+    type: pvc
+    storageClassName: gp3
+    accessModes:
+      - ReadWriteOnce
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
