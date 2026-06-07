@@ -3,6 +3,9 @@
 Single source of progress truth for the lean Coder+AI GovCloud demo.
 Target: `us-gov-west-1`, `usgov.coderdemo.io`. Account `430737322961`.
 
+> Engineering "as-built" documentation (architecture, configuration, and the
+> declarative-vs-imperative ledger) lives in [`docs/as-built/`](docs/as-built/README.md).
+
 > Overnight autonomous build by Coder Agents. **The full stack is deployed and
 > running.** One action remains before AI responses work end to end: drop a real
 > Anthropic API key into the `anthropic` AI provider (see "Remaining action").
