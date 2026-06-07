@@ -7,8 +7,15 @@
 #   docker.io/bitnami/postgresql:16   -> <ecr>/docker-hub/bitnami/postgresql:16
 #   ghcr.io/org/app:v1.2.3            -> <ecr>/ghcr/org/app:v1.2.3
 #   quay.io/keycloak/keycloak:26.0    -> <ecr>/quay/keycloak/keycloak:26.0
-#
-# Populate with the images each workstream actually needs. Examples (commented):
-# docker.io/library/nginx:1.27
-# quay.io/keycloak/keycloak:26.0
-# quay.io/jetstack/cert-manager-controller:v1.16.2
+
+# --- Coder control plane (deploy/coder) ---
+ghcr.io/coder/coder:v2.34.0
+
+# --- Keycloak SSO (deploy/keycloak) ---
+quay.io/keycloak/keycloak:26.6.3
+
+# --- GitLab single-container omnibus (deploy/gitlab) ---
+docker.io/gitlab/gitlab-ce:19.0.1-ce.0
+
+# --- Workspace base image for the Claude Code template (coder-templates/claude-code) ---
+docker.io/codercom/enterprise-base:ubuntu-noble-20260601

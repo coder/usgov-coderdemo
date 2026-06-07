@@ -1,0 +1,169 @@
+# Helm values for the official Coder chart, pinned to v2.34.0.
+# Chart + appVersion 2.34.0 (see versions.lock.yaml / deploy/CONVENTIONS.md).
+#
+# Scope of this file: the Coder control-plane only. The platform layer
+# (orchestrator) owns ingress-nginx, the NLB + ACM cert, the `coder`
+# namespace, and the k8s Secrets referenced below. This file only declares
+# Coder's Deployment, ServiceAccount, Service, and Ingress.
+#
+# TLS: terminates UPSTREAM at the NLB (ACM cert) via the ingress-nginx
+# controller Service annotations. Traffic from nginx to Coder is plain HTTP,
+# so the Ingress here requests NO certificate (no cert-manager).
+#
+# >>> READ deploy/coder/README.md before installing. <<<
+# In particular, the AI Gateway provider env vars below are DEPRECATED as of
+# v2.34: they SEED the database ONCE on first startup, then the database is
+# authoritative. Changing them after seeding makes coderd fail to start.
+
+coder:
+  # Image is the upstream ghcr.io/coder/coder:v2.34.0 mirrored into private
+  # ECR (no pull-through cache in GovCloud). Mirror mapping from CONVENTIONS:
+  #   ghcr.io/coder/coder:v2.34.0
+  #     -> 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/ghcr/coder/coder:v2.34.0
+  image:
+    repo: "430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/ghcr/coder/coder"
+    tag: "v2.34.0"
+    pullPolicy: IfNotPresent
+
+  # The chart always creates a ServiceAccount named `coder`. Annotate it for
+  # IRSA so the AI Gateway Bedrock provider can call bedrock:InvokeModel and
+  # bedrock:InvokeModelWithResponseStream with temporary credentials (no static
+  # AWS keys). Role authored in terraform/ (output: bedrock_role_arn).
+  serviceAccount:
+    name: coder
+    workspacePerms: true
+    enableDeployments: true
+    annotations:
+      eks.amazonaws.com/role-arn: "arn:aws-us-gov:iam::430737322961:role/usgov-coderdemo-coder-bedrock"
+
+  # Coder sits BEHIND ingress-nginx, so its own Service must NOT provision a
+  # second load balancer. Override the chart default (LoadBalancer) to ClusterIP.
+  service:
+    enable: true
+    type: ClusterIP
+
+  # We set CODER_ACCESS_URL explicitly below, so do not let the chart inject a
+  # cluster-internal access URL.
+  envUseClusterAccessURL: false
+
+  # One internet-facing NLB -> ingress-nginx -> this Ingress. TLS already
+  # terminated at the NLB, so tls.enable=false (plain HTTP backend, no cert
+  # requested here).
+  ingress:
+    enable: true
+    className: "nginx"
+    host: "dev.usgov.coderdemo.io"
+    wildcardHost: "*.usgov.coderdemo.io"
+    tls:
+      enable: false
+    annotations:
+      # TLS is terminated upstream at the NLB; do not redirect to HTTPS at nginx
+      # (backend is plain HTTP) to avoid a redirect loop.
+      nginx.ingress.kubernetes.io/ssl-redirect: "false"
+      # Coder relies on long-lived websockets (web terminal, agent, logs) and
+      # streams large payloads; relax nginx proxy limits accordingly.
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "86400"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "86400"
+      nginx.ingress.kubernetes.io/proxy-body-size: "0"
+
+  env:
+    # --- Core access URLs -------------------------------------------------
+    - name: CODER_ACCESS_URL
+      value: "https://dev.usgov.coderdemo.io"
+    # Single-level wildcard so the one ACM cert covers dashboard + apps.
+    - name: CODER_WILDCARD_ACCESS_URL
+      value: "*.usgov.coderdemo.io"
+
+    # --- Database ---------------------------------------------------------
+    # Full libpq/URL connection string for the `coder` DB on RDS, supplied by
+    # the platform layer as Secret `coder-db` (key `url`). See secrets.example.yaml.
+    - name: CODER_PG_CONNECTION_URL
+      valueFrom:
+        secretKeyRef:
+          name: coder-db
+          key: url
+
+    # --- Keycloak OIDC SSO ------------------------------------------------
+    - name: CODER_OIDC_ISSUER_URL
+      value: "https://auth.usgov.coderdemo.io/realms/coder"
+    - name: CODER_OIDC_CLIENT_ID
+      value: "coder"
+    - name: CODER_OIDC_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: coder-oidc
+          key: client-secret
+    # Standard OIDC claims emitted by a Keycloak realm.
+    - name: CODER_OIDC_SCOPES
+      value: "openid,profile,email"
+    - name: CODER_OIDC_EMAIL_FIELD
+      value: "email"
+    - name: CODER_OIDC_USERNAME_FIELD
+      value: "preferred_username"
+    # Demo: let SSO users self-provision on first login.
+    - name: CODER_OIDC_ALLOW_SIGNUPS
+      value: "true"
+    - name: CODER_OIDC_SIGN_IN_TEXT
+      value: "Sign in with Keycloak"
+
+    # --- AI Gateway (AI Governance Add-On) --------------------------------
+    # AI Gateway is enabled by default in v2.34; set explicitly for clarity.
+    # NOTE: provider env vars are deprecated and seed the DB ONCE. After the
+    # first successful startup, manage providers at /ai/settings. Do NOT edit
+    # these values in place afterward or coderd will refuse to start (drift
+    # guard). See README "AI Gateway provider seeding" for the safe workflow.
+    - name: CODER_AI_GATEWAY_ENABLED
+      value: "true"
+
+    # Provider 0 = Anthropic-direct (PRIMARY, demo reliability).
+    # Egress to api.anthropic.com leaves the VPC via the NAT gateway.
+    #
+    # NAME MUST be "anthropic": the claude-code workspace module (4.7.3)
+    # hardcodes ANTHROPIC_BASE_URL=<access_url>/api/v2/aibridge/anthropic, and
+    # the AI Gateway routes by provider NAME (verified: POST
+    # /api/v2/aibridge/<name>/v1/messages). A name like "anthropic-direct"
+    # makes that route 404, so Claude Code cannot reach the provider.
+    - name: CODER_AI_GATEWAY_PROVIDER_0_TYPE
+      value: "anthropic"
+    - name: CODER_AI_GATEWAY_PROVIDER_0_NAME
+      value: "anthropic"
+    - name: CODER_AI_GATEWAY_PROVIDER_0_BASE_URL
+      value: "https://api.anthropic.com"
+    - name: CODER_AI_GATEWAY_PROVIDER_0_KEY
+      valueFrom:
+        secretKeyRef:
+          name: coder-ai
+          key: ANTHROPIC_API_KEY
+
+    # Provider 1 = Amazon Bedrock (SECONDARY, in-boundary, IRSA, NO static keys).
+    # `bedrock` type authenticates via the AWS SDK default credential chain,
+    # which picks up the IRSA web-identity token from the annotated SA above.
+    # Bedrock-ness is detected by BEDROCK_REGION (no default); no API key is
+    # attached. Claude Sonnet 4.5 access is still gated, so this provider may be
+    # disabled at demo time from /ai/settings, but it is wired here.
+    - name: CODER_AI_GATEWAY_PROVIDER_1_TYPE
+      value: "bedrock"
+    - name: CODER_AI_GATEWAY_PROVIDER_1_NAME
+      value: "anthropic-bedrock"
+    - name: CODER_AI_GATEWAY_PROVIDER_1_BEDROCK_REGION
+      value: "us-gov-west-1"
+    - name: CODER_AI_GATEWAY_PROVIDER_1_BEDROCK_MODEL
+      value: "us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    # Claude Code uses a Haiku-class "small fast model" for background tasks.
+    # Nova Pro is the proven in-GovCloud fallback.
+    - name: CODER_AI_GATEWAY_PROVIDER_1_BEDROCK_SMALL_FAST_MODEL
+      value: "amazon.nova-pro-v1:0"
+
+    # --- AWS SDK / IRSA resolution (GovCloud) -----------------------------
+    # Give the AWS SDK an explicit region for endpoint construction and for the
+    # regional STS AssumeRoleWithWebIdentity call used by IRSA.
+    - name: AWS_REGION
+      value: "us-gov-west-1"
+    - name: AWS_DEFAULT_REGION
+      value: "us-gov-west-1"
+    - name: AWS_STS_REGIONAL_ENDPOINTS
+      value: "regional"
+
+  # Single replica for the demo. HA (replicaCount > 1) is an Enterprise feature
+  # and is out of scope.
+  replicaCount: 1

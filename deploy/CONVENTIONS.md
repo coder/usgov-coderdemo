@@ -1,0 +1,109 @@
+# App-layer conventions (the contract)
+
+Shared facts for every app-layer workstream. Read this before drafting.
+Draft files ONLY in your assigned directory. Do not run terraform, kubectl,
+helm, or aws against live infra. Do not edit `terraform/` or other
+workstreams' directories. Return a concise report plus the list of container
+images your workstream needs (fully-qualified upstream refs, pinned tags).
+
+## Account / region
+
+- Partition `aws-us-gov`, account `430737322961`, region `us-gov-west-1`.
+- Domain: `usgov.coderdemo.io`.
+
+## Hostnames (single ACM cert covers `usgov.coderdemo.io` + `*.usgov.coderdemo.io`)
+
+| Host | Service |
+|---|---|
+| `dev.usgov.coderdemo.io` | Coder dashboard |
+| `*.usgov.coderdemo.io` | Coder workspace apps (wildcard) |
+| `auth.usgov.coderdemo.io` | Keycloak |
+| `gitlab.usgov.coderdemo.io` | GitLab |
+
+ACM cert ARN: `arn:aws-us-gov:acm:us-gov-west-1:430737322961:certificate/7f4fc566-8efd-4aa5-b6ba-3b0c9a535d12`
+
+## Ingress (locked)
+
+One internet-facing **NLB → ingress-nginx → one ACM cert**. TLS terminates at
+the NLB via the AWS LB annotations on the ingress-nginx controller Service
+(`aws-load-balancer-ssl-cert` = the ACM ARN, `aws-load-balancer-type=external`,
+`nlb-target-type=ip`, ssl-ports=443). Backends are plain HTTP. Each app exposes
+an `Ingress` with `ingressClassName: nginx` and its host from the table above.
+The platform layer (owned by the orchestrator) installs ingress-nginx and the
+namespaces; your workstream only declares its own `Ingress` object.
+
+## Namespaces
+
+`coder`, `keycloak`, `gitlab`. Service accounts created per app.
+
+## Versions (source of truth: `versions.lock.yaml`)
+
+- EKS / k8s **1.36**, PostgreSQL **18.4**
+- Coder **2.34.0** (Helm chart + `ghcr.io/coder/coder:v2.34.0`)
+- Keycloak **26.6.3**
+- GitLab CE **19.0.1**
+- claude-code Coder module **4.7.3**
+
+## Images (ECR mirror; no pull-through in GovCloud)
+
+Registry: `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com`. The orchestrator
+populates `scripts/images.txt` from your reported images. Mirror path mapping
+(`scripts/mirror-images.sh`):
+
+- `docker.io/<repo>:<tag>` → `<registry>/docker-hub/<repo>:<tag>`
+- `quay.io/<repo>:<tag>` → `<registry>/quay/<repo>:<tag>`
+- `ghcr.io/<repo>:<tag>` → `<registry>/ghcr/<repo>:<tag>`
+
+Reference ECR images by the mirrored path. Report the upstream refs you used.
+
+## Database (RDS PostgreSQL 18.4, single instance)
+
+- Endpoint: `terraform -chdir=terraform output -raw rds_endpoint` (host only).
+- Master creds: Secrets Manager `usgov-coderdemo/rds/master` (JSON:
+  `username`,`password`,`host`,`port`). Master user `dbadmin`.
+- Logical databases (the orchestrator's db-init job creates these + roles):
+  - `coder` (already the instance default db)
+  - `keycloak`
+  - `gitlabhq_production`
+- Assume each app reads its DB password from a k8s Secret named
+  `<app>-db` (key `password`) that the platform layer will create. Declare the
+  Secret name you expect; do not invent passwords.
+
+## AI path (Coder AI Gateway)
+
+Two providers configured; AI Governance Add-On license is present.
+
+1. **Anthropic-direct (PRIMARY for demo reliability)** — points at
+   `api.anthropic.com`; egress leaves the VPC via the NAT gateway. API key
+   comes from a k8s Secret (key `ANTHROPIC_API_KEY`); never hardcode it.
+2. **Bedrock (in-boundary, SECONDARY)** — IRSA, no static keys. The Coder
+   service account `coder/coder` is annotated with
+   `eks.amazonaws.com/role-arn: arn:aws-us-gov:iam::430737322961:role/usgov-coderdemo-coder-bedrock`.
+   Region `us-gov-west-1`; model
+   `us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0`; Nova Pro
+   (`amazon.nova-pro-v1:0`) is the proven fallback. Claude access is still
+   gated, so Bedrock may be disabled at demo time but must be wired.
+
+Verify exact env var / values schema against
+`https://coder.com/docs/ai-coder/ai-gateway` (provider env vars like
+`BEDROCK_REGION`, `BEDROCK_MODEL`, and indexed
+`CODER_AI_GATEWAY_<TYPE>_<INDEX>_<FIELD>`). Client uses
+`ANTHROPIC_BASE_URL=<access-url>/api/v2/aibridge/anthropic` +
+`ANTHROPIC_AUTH_TOKEN=<coder session token>`.
+
+## Coder server env (highlights)
+
+- `CODER_ACCESS_URL=https://dev.usgov.coderdemo.io`
+- `CODER_WILDCARD_ACCESS_URL=*.usgov.coderdemo.io`
+- OIDC via Keycloak realm `coder`, client `coder`, issuer
+  `https://auth.usgov.coderdemo.io/realms/coder`.
+
+## Directory ownership
+
+| Dir | Workstream |
+|---|---|
+| `deploy/coder/` | Coder Helm values + Ingress |
+| `deploy/keycloak/` | Keycloak Deployment/Service/Ingress + realm import |
+| `deploy/gitlab/` | GitLab single-container + Ingress |
+| `coder-templates/claude-code/` | Workspace template (Coder Agents + Claude Code) |
+| `deploy/platform/` , `scripts/images.txt` | Orchestrator (do not edit) |
