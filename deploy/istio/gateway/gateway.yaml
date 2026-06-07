@@ -1,0 +1,31 @@
+# Single L7 ingress Gateway for the four public hosts.
+#
+# The NLB terminates TLS (ACM) and forwards decrypted HTTP to the Istio ingress
+# gateway pod's port 8080, which Istio exposes as this Gateway's port 80 HTTP
+# server. There is no TLS block here because TLS lives at the NLB (option A in
+# issue #30). Per-host routing is done by the Virtualservices in this directory.
+#
+# The wildcard host serves Coder workspace apps. Exact-host VirtualServices
+# (auth, gitlab, grafana) win over the wildcard, so those route to their own
+# backends rather than to Coder.
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: public-gateway
+  namespace: istio-system
+  labels:
+    app.kubernetes.io/part-of: usgov-coderdemo
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "dev.usgov.coderdemo.io"
+        - "auth.usgov.coderdemo.io"
+        - "gitlab.usgov.coderdemo.io"
+        - "grafana.usgov.coderdemo.io"
+        - "*.usgov.coderdemo.io"

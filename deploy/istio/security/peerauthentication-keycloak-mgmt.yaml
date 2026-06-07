@@ -1,0 +1,31 @@
+# OPTIONAL defense-in-depth for the Keycloak management port (9000).
+#
+# Keycloak's startup/liveness/readiness probes hit the management port 9000.
+# Under mesh-wide STRICT this is already safe because Istio probe rewrite (on by
+# default) reroutes kubelet HTTP probes through the pilot-agent (15020) over
+# plain text, so the kubelet, which has no sidecar, still passes probes.
+#
+# This port-level PeerAuthentication is the explicit belt-and-suspenders: it
+# pins port 9000 to PERMISSIVE on the Keycloak workload so the management port is
+# never subject to mTLS even if probe rewrite is ever disabled. 9000 is not
+# exposed by any Service, so this does not widen the external surface.
+#
+# Equivalent alternative (owned by the keycloak workstream, not applied here):
+# add `traffic.sidecar.istio.io/excludeInboundPorts: "9000"` to the Keycloak pod
+# template in deploy/keycloak/deployment.yaml. Use one or the other, not both.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: keycloak-management
+  namespace: keycloak
+  labels:
+    app.kubernetes.io/part-of: usgov-coderdemo
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  mtls:
+    mode: PERMISSIVE
+  portLevelMtls:
+    "9000":
+      mode: PERMISSIVE
