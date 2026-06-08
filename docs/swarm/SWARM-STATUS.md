@@ -43,6 +43,10 @@
 | Coder API admin login | PASS | https://dev.usgov.coderdemo.io reachable, token issued |
 | coderdemo/coder-templates pipeline | PASS | #8 green end to end |
 | Registry images | PASS | ubi9-base + ubi9-node tags present |
+| WS-20 aibridge anthropic + openai routes | PASS | both POST routes HTTP 200 with real completions |
+| WS-21 envdocs gate + content | PASS | 302 to Keycloak (client_id=envdocs); built site 200 behind gate with Mermaid |
+| WS-24 dashboards provisioned | PASS | ai-gateway + agent-firewall loaded by Grafana, no errors |
+| WS-25 template import (coder + alpha) | PASS | all 5 plan-validated and imported; metadata applied |
 
 ## Go/no-go for live applies (need orchestrator/user confirmation before apply)
 - WS-20 apply: DONE. Enabled anthropic + openai providers via the AI Providers
@@ -54,12 +58,19 @@
   new OIDC client, new Route53 record); did not touch existing hosts. Verified
   302 gate plus 200 site behind the gate. Routes via ingress-nginx (issue #34
   decommission would require moving envdocs to Istio first).
-- WS-24 apply: delete custom dashboard, apply upstream aibridge+boundary
-  dashboards. Reversible via git; verify panels 200 after.
-- WS-23 apply: webhook -> Coder Agents API as the assigned developer; new PM
-  persona (additive). Security-sensitive (impersonation/token); review the
-  design before apply.
-- WS-22: NO live apply tonight (read-only); decision pending sub-agent findings.
+- WS-24 apply: DONE (additive). New ai-gateway + agent-firewall dashboards
+  provisioned and verified. OPEN DECISION for the morning: delete the old
+  combined `coder-dashboard-ai-governance` (the two new dashboards supersede it):
+  `kubectl delete configmap coder-dashboard-ai-governance -n monitoring`.
+- WS-25: DONE (push + metadata) in orgs coder and alpha. REMAINING (manual): a
+  one-time in-boundary GitLab OAuth login by the owner, then build one workspace
+  per template and run the C4 connectivity check.
+- WS-23 apply: NOT applied. Webhook -> Coder Tasks API as the assigned developer
+  (owner=assignee) + a PM persona (additive). Security-sensitive; the security
+  review checklist in docs/swarm/handoffs/WS-23-handoff.md must be approved
+  first.
+- WS-22: read-only complete, decision GO. WS-22b enablement (agent firewall on
+  claude-code, default-off) is staged for review.
 
 ## Active locks / warnings
 - versions.lock.yaml is authoritative (Coder 2.34.0, k8s 1.36, KC 26.6.3, GitLab
@@ -70,14 +81,25 @@
   tasking (realm name "coder", GitLab now on EKS, single coderd replica), the
   live system + Phase-2 prompt are authoritative.
 
-## Next wave
-- Collect Wave A sub-agent handoffs; review authored artifacts; commit per-WS.
-- Wave B (root, serialized, <=2 EKS mutators): WS-20 apply (go/no-go), WS-21
-  build+publish, WS-24 deploy+rename, WS-23 design+persona+handler.
-- Wave C: WS-24c panel verification; WS-25 push+test templates; WS-25c
-  super-admin + full e2e acceptance.
+## Remaining for the user (morning)
+- WS-25 e2e: complete a one-time GitLab OAuth login as the owner, then build one
+  workspace per template (orgs coder/alpha) and run
+  scripts/validate-connectivity.sh --track a; confirm app URLs load (JupyterLab
+  for data-scientist). Templates are imported and ready.
+- WS-23: review the security checklist, then apply the PM persona
+  (scripts/setup-pm-persona.py --apply) and the attribution receiver/webhook if
+  desired.
+- WS-24: decide whether to delete the old ai-governance dashboard (command
+  above).
+- WS-22b: decide whether to enable the agent firewall on claude-code
+  (default-off).
+- PR #38 (draft) collects every Phase-2 artifact for review.
 
 ## Retry log
 | WS | Attempt | Result |
 |----|---------|--------|
 | recreation push-template | 2 | PASS (attempt 1 transient github 504) |
+| WS-25 ai-agent-generic push (coder) | many | PASS after github recovered (earlier 504 outage) |
+| WS-25 platform-engineer push (coder) | 2 | PASS after fixing the heredoc `$${...}` escaping |
+| WS-25 java/platform push (alpha) | 2 | PASS on spaced retry (intermittent github 504) |
+| WS-25 templates edit (4 of 5) | 2 | PASS after shortening descriptions to <=128 chars |
