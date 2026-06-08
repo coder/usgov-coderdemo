@@ -5,7 +5,8 @@ service mesh (control plane `istiod`, an ingress gateway on its own NLB, and
 sidecar proxies in the platform namespaces). The Istio ingress gateway is now
 the single L7 hop in front of every public host, one `Gateway` plus per-host
 `VirtualService` objects route `dev`/workspace apps to Coder and `auth`,
-`gitlab`, `grafana`, `kiali` to their backends, and mesh-wide STRICT mutual TLS
+`gitlab`, `grafana`, `kiali`, and the GitLab Container Registry (`registry`) to
+their backends, and mesh-wide STRICT mutual TLS
 encrypts traffic between the meshed control-plane workloads. The gateway also
 fixes the Keycloak Account Console cookie bug by presenting a trustworthy
 `x-forwarded-proto: https` to every backend. Kiali is the mesh console, behind
@@ -124,10 +125,22 @@ from a direct caller is replaced:
 | `gitlab.usgov.coderdemo.io` | `gitlab` (`gitlab`) | `gitlab.gitlab.svc:80` |
 | `grafana.usgov.coderdemo.io` | `grafana` (`monitoring`) | `kps-grafana.monitoring.svc:80` |
 | `kiali.usgov.coderdemo.io` | `kiali` (`istio-system`) | `kiali.istio-system.svc:20001` |
+| `registry.usgov.coderdemo.io` (GitLab Container Registry) | `gitlab-registry` (`gitlab`) | `gitlab.gitlab.svc:5050` |
+
+The `registry` host is the GitLab Container Registry route added with the GitLab
+CI work (PR #36, `deploy/gitlab/virtualservice-registry.yaml`). It has no
+dedicated `Gateway` host entry and no dedicated Route53 record; it resolves
+through the `*.usgov.coderdemo.io` wildcard DNS to the gateway NLB and is served
+by the Gateway's wildcard server, where the exact-host `gitlab-registry`
+VirtualService wins over the Coder wildcard route and lands on the registry
+listener `gitlab.gitlab.svc:5050`. Verified live 2026-06-08: an anonymous
+`GET https://registry.usgov.coderdemo.io/v2/` returns `401` (the registry auth
+challenge) over valid TLS.
 
 Routing precedence: the wildcard server carries Coder's dashboard and the
 workspace-app subdomains, while the exact-host VirtualServices (`auth`, `gitlab`,
-`grafana`, `kiali`) win over the wildcard and land on their own backends. The
+`grafana`, `kiali`, `registry`) win over the wildcard and land on their own
+backends. The
 Coder and GitLab routes set no route timeout (Envoy applies none), so long-lived
 websockets, streaming terminals, CI log streams, and git-over-HTTP stay open, and
 Envoy imposes no fixed request body cap, which covers large uploads and registry
@@ -186,6 +199,7 @@ recreated). Injected, in lowest-blast-radius order:
 | Namespace | Why excluded |
 |---|---|
 | `coder-workspaces` | Highest risk. Workspace pods are created dynamically and run the Coder agent (DERP/tunnel networking, many outbound connections, web terminals); sidecar iptables capture can break agent connectivity. Coder Boundary runs in-process, and workspace-to-Coder traffic transits the ingress gateway (the public URL), not direct pod-to-pod, so excluding this namespace leaves no unencrypted east-west gap that STRICT would otherwise cover. A single-workspace injection pilot is a later, separate experiment. |
+| `gitlab-runner` | CI job pods are short-lived and would race an injected sidecar's lifecycle; under STRICT a plain-text hop from a non-meshed pod to a meshed Service is refused, so the runner and its job pods reach GitLab and Coder over their external URLs (`https://gitlab.usgov.coderdemo.io`, `https://dev.usgov.coderdemo.io`) through the gateway, which does the mTLS hop to the meshed backends. Labeled `istio-injection=disabled` (`deploy/gitlab-runner/namespace.yaml`). |
 | `monitoring` | Owned by the observability workstream; injecting it needs mesh-aware scraping under STRICT and is a coordinated later step. Leaving it out keeps Prometheus scraping over plain text during the core rollout. |
 | `external-secrets` | ESO controllers talk to the k8s API and AWS (IRSA) and run admission webhooks; no in-mesh east-west value, real webhook risk. |
 | `kube-system`, `kube-node-lease`, `kube-public`, `default`, `ingress-nginx` | System namespaces and cluster add-ons; never injected. |
@@ -260,18 +274,26 @@ nginx is intentionally still running for exactly this reason.
   gitlab, keycloak).
 - `kubectl -n istio-system get svc istio-ingressgateway`: `LoadBalancer` with the
   gateway NLB hostname; ports `15021`, `80`, `443`.
-- `kubectl get gateway,virtualservice -A`: one `public-gateway` and the five
-  per-host VirtualServices above.
+- `kubectl get gateway,virtualservice -A`: one `public-gateway` and the six
+  per-host VirtualServices above (including `gitlab-registry`).
 - `kubectl get peerauthentication -A`: `default` STRICT (istio-system),
   `coder-metrics` STRICT (coder), `keycloak-management` STRICT (keycloak).
 - `kubectl get serviceentry,destinationrule -A`: `rds-postgres` MESH_EXTERNAL +
   its DestinationRule.
 - `kubectl get ns -L istio-injection`: `enabled` on `coder`, `gitlab`,
-  `keycloak`; blank on `coder-workspaces`, `monitoring`, `external-secrets`.
+  `keycloak`; blank on `coder-workspaces`, `monitoring`, `external-secrets`;
+  `disabled` on `gitlab-runner`.
 - Keycloak authorize endpoint through the gateway: session cookies carry
   `Secure; SameSite=None`.
 - Public hosts resolve to the gateway NLB and serve valid TLS; Kiali host returns
   200, its anonymous API 401.
+
+Re-verified live 2026-06-08: `istioctl version` reports `1.30.1` for client,
+control plane, and data plane (7 proxies); `istioctl proxy-status` shows all 7
+SYNCED; `default`, `coder-metrics`, and `keycloak-management` PeerAuthentications
+read `STRICT`; the `rds-postgres` ServiceEntry/DestinationRule are present; six
+VirtualServices bind `public-gateway`; every public host resolves to the gateway
+NLB IPs and all mesh pods are Ready.
 
 ## Notes and known gaps
 

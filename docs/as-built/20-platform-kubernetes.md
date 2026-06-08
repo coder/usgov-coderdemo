@@ -12,9 +12,10 @@ Live `kubectl get ns` plus `kubectl get pods -A -o wide`:
 
 | Namespace | Workloads (live) |
 |---|---|
-| `coder` | Coder control plane `coder` (Deployment, 1 replica) |
+| `coder` | Coder control plane `coder` (Deployment, 1 replica) + two external per-tenant provisioner daemons `coder-provisioner-alpha` / `coder-provisioner-bravo` (Deployments, `deploy/coder/provisioners.yaml`) |
 | `coder-workspaces` | Workspace pods (e.g. `coder-8e0c3f4a-...`, 1/1 Running) |
 | `gitlab` | `gitlab-0` (StatefulSet, embedded Postgres/Redis) |
+| `gitlab-runner` | `gitlab-runner` manager (Deployment); non-meshed CI runner, `istio-injection=disabled`, reaches GitLab/Coder over external URLs (`deploy/gitlab-runner/`) |
 | `keycloak` | `keycloak` (Deployment, 1 replica) |
 | `ingress-nginx` | `ingress-nginx-controller` (2 replicas), out of the DNS path, kept for rollback (issue #34) |
 | `istio-system` | Istio mesh: `istiod`, `istio-ingressgateway` (2, the live edge NLB), `kiali`. See [25-istio-service-mesh.md](25-istio-service-mesh.md) |
@@ -167,9 +168,17 @@ Live Helm releases (`kubectl get secret -A -l owner=helm`):
 
 | Release | Namespace | Revisions |
 |---|---|---|
-| `coder` | `coder` | v1..v4 |
+| `coder` | `coder` | v1..v5 |
 | `ingress-nginx` | `ingress-nginx` | v1 |
 | `aws-load-balancer-controller` | `kube-system` | v1 |
+| `external-secrets` | `external-secrets` | v1 |
+| `gitlab-runner` | `gitlab-runner` | v1..v2 |
+| `kps` (kube-prometheus-stack) | `monitoring` | v1..v2 |
+
+The `coder` release is now at revision v5 (live 2026-06-08). `external-secrets`
+(ESO), `gitlab-runner`, and `kps` (kube-prometheus-stack) are owned by the
+secrets, GitLab CI, and observability workstreams respectively; their detail
+lives in those layer docs.
 
 Keycloak and GitLab are not Helm releases; they are plain manifests applied with
 `kubectl apply` (`kubectl apply -k deploy/keycloak/`, `kubectl apply -f

@@ -15,6 +15,14 @@ it was not re-executed here (read-only, GET-only); the 502 proof below is cited
 from `STATUS.md` and the facts sheet, and the live providers/config it depends
 on were independently re-verified.
 
+Re-verified live this session (read-only): `GET /api/v2/buildinfo` reports
+`v2.34.0+3006da5`; the AI Governance dashboard ConfigMap
+`coder-dashboard-ai-governance` (ns `monitoring`) holds 42 panel entries (four
+row headers plus 38 data panels) and references datasource uids `prometheus`,
+`loki`, and `aibridge-postgres`; the `aibridge-postgres-datasource` ConfigMap is
+present in ns `monitoring`; and the seeded provider env vars in
+`deploy/coder/values.yaml` are unchanged at the cited line ranges.
+
 ## Enabled by default in v2.34
 
 AI Gateway is enabled by default in v2.34 and is set explicitly in Helm

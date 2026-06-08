@@ -41,7 +41,8 @@ not declared in this Terraform; they are bootstrap inputs created out of band.
 | ECR registry | `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com` | `.substrate-outputs.json`; `terraform/outputs.tf` |
 | ACM certificate | `arn:aws-us-gov:acm:us-gov-west-1:430737322961:certificate/7f4fc566-8efd-4aa5-b6ba-3b0c9a535d12` (`*.usgov.coderdemo.io` + apex) | `versions.lock.yaml`; `deploy/platform/ingress-nginx-values.yaml` |
 | Route53 zone | `Z06701704WFETYIRU5C8` (`usgov.coderdemo.io`) | `terraform/variables.tf`; live `aws route53` |
-| Ingress NLB | internet-facing NLB `k8s-ingressn-ingressn-e16fe3cd33-c002102481951644.elb.us-gov-west-1.amazonaws.com` | live `kubectl`/`aws route53` |
+| Edge NLB (live) | internet-facing NLB `k8s-istiosys-istioing-bf7bdca8c8-866d61e8e6f9204f.elb.us-gov-west-1.amazonaws.com` (Istio ingress gateway; all Route53 records alias here) | live `kubectl`/`aws elbv2`/`aws route53` |
+| Ingress NLB (rollback) | internet-facing NLB `k8s-ingressn-ingressn-e16fe3cd33-c002102481951644.elb.us-gov-west-1.amazonaws.com` (ingress-nginx; out of the DNS path, kept for rollback, issue #34) | live `kubectl`/`aws elbv2` |
 
 ## VPC and egress
 
@@ -210,34 +211,47 @@ Sources: `scripts/images.txt`, `scripts/mirror-images.sh`,
 ## DNS, ACM, and the NLB ingress path
 
 Route53 hosted zone `Z06701704WFETYIRU5C8` holds these records (live
-`aws route53 list-resource-record-sets`):
+`aws route53 list-resource-record-sets`, re-verified 2026-06-08):
 
 | Record | Type | Target |
 |---|---|---|
 | `usgov.coderdemo.io` | NS, SOA | delegation |
-| `dev.usgov.coderdemo.io` | A (alias) | ingress NLB |
-| `auth.usgov.coderdemo.io` | A (alias) | ingress NLB |
-| `gitlab.usgov.coderdemo.io` | A (alias) | ingress NLB |
-| `*.usgov.coderdemo.io` | A (alias) | ingress NLB |
-| `_2632...usgov.coderdemo.io` | CNAME | ACM DNS validation |
+| `dev.usgov.coderdemo.io` | A (alias) | Istio gateway NLB |
+| `auth.usgov.coderdemo.io` | A (alias) | Istio gateway NLB |
+| `gitlab.usgov.coderdemo.io` | A (alias) | Istio gateway NLB |
+| `grafana.usgov.coderdemo.io` | A (alias) | Istio gateway NLB |
+| `kiali.usgov.coderdemo.io` | A (alias) | Istio gateway NLB |
+| `*.usgov.coderdemo.io` | A (alias) | Istio gateway NLB |
+| `_2632a7fd...usgov.coderdemo.io` | CNAME | ACM DNS validation |
 
-All four service/wildcard records are alias A records pointing at the
-internet-facing NLB
-`k8s-ingressn-ingressn-e16fe3cd33-c002102481951644.elb.us-gov-west-1.amazonaws.com`.
-The Route53 zone and the ACM certificate pre-exist this Terraform (referenced by
-ID/ARN in `terraform/variables.tf`); the records were created imperatively at
-deploy time (`deploy/platform/README.md`).
+All six service/wildcard records are alias A records pointing at the
+internet-facing Istio gateway NLB
+`k8s-istiosys-istioing-bf7bdca8c8-866d61e8e6f9204f.elb.us-gov-west-1.amazonaws.com`
+(the live edge; each host resolves to its three public IPs, verified live
+2026-06-08). The earlier ingress-nginx NLB
+`k8s-ingressn-ingressn-e16fe3cd33-c002102481951644.elb.us-gov-west-1.amazonaws.com`
+is no longer in any Route53 path; it is kept only for rollback (issue #34). The
+`registry.usgov.coderdemo.io` host (GitLab Container Registry) has no dedicated
+record and resolves through the `*` wildcard. The Route53 zone and the ACM
+certificate pre-exist this Terraform (referenced by ID/ARN in
+`terraform/variables.tf`); the records were created imperatively and cut over to
+the gateway NLB at deploy time (`deploy/platform/README.md`,
+`deploy/istio/README.md`).
 
-Ingress path:
+Ingress path (live edge):
 
 ```
-client --HTTPS 443--> NLB (TLS terminated, ACM *.usgov.coderdemo.io)
-        --HTTP--> ingress-nginx controller --HTTP--> app pods
+client --HTTPS 443--> Istio gateway NLB (TLS terminated, ACM *.usgov.coderdemo.io)
+        --HTTP--> Istio ingress gateway --mTLS--> meshed app Services
 ```
 
 The single ACM certificate `7f4fc566-8efd-4aa5-b6ba-3b0c9a535d12` covers the
-apex and the single-level wildcard `*.usgov.coderdemo.io`, which matches both
-the Coder dashboard host and the workspace-app wildcard. TLS terminates at the
-NLB; traffic from the NLB to nginx and from nginx to pods is plain HTTP. NLB
-provisioning, listener, and TLS detail are covered in
-`docs/as-built/20-platform-kubernetes.md`.
+apex and the single-level wildcard `*.usgov.coderdemo.io`, which matches the
+Coder dashboard host, the workspace-app wildcard, and the
+`auth`/`gitlab`/`grafana`/`kiali`/`registry` hosts (live ACM SANs:
+`usgov.coderdemo.io`, `*.usgov.coderdemo.io`). TLS terminates at the NLB; the NLB
+forwards plain HTTP to the Istio ingress gateway, which forwards to the meshed
+app Services over mTLS (STRICT). The retained ingress-nginx rollback path (NLB to
+nginx to pods, all plain HTTP) and the gateway NLB listener detail are covered in
+`docs/as-built/20-platform-kubernetes.md` and
+`docs/as-built/25-istio-service-mesh.md`.

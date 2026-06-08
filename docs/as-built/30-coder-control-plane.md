@@ -28,6 +28,7 @@ Always target `https://dev.usgov.coderdemo.io` explicitly; the ambient
 | Replicas | same | `1` |
 | Service type | `kubectl -n coder get svc coder` | `ClusterIP` |
 | Ingress | `kubectl -n coder get ingress` | class `nginx`, hosts `dev.` + `*.usgov.coderdemo.io` |
+| Live edge | `kubectl get virtualservice -n coder` / `get gateway -n istio-system` | `coder` VirtualService on `istio-system/public-gateway`, host `*.usgov.coderdemo.io` |
 
 ## Image (ECR ghcr mirror)
 
@@ -114,6 +115,36 @@ agent, logs) and large streamed payloads. Source:
 Verified live: the `coder` Ingress has `ingressClassName: nginx`, rules for
 `dev.usgov.coderdemo.io` and `*.usgov.coderdemo.io`, and exactly the four nginx
 annotations above (`kubectl -n coder get ingress`).
+
+### Live edge: Istio gateway (nginx Ingress is the rollback path)
+
+Public DNS now resolves Coder through the Istio ingress gateway, not
+ingress-nginx. The `coder` VirtualService (ns `coder`) binds host
+`*.usgov.coderdemo.io` to gateway `istio-system/public-gateway` and routes to
+`coder.coder.svc.cluster.local:80`, forcing `x-forwarded-proto: https` for
+parity with the other hosts (`deploy/istio/gateway/virtualservice-coder.yaml`).
+The single wildcard already matches `dev.usgov.coderdemo.io`, so only the
+wildcard is listed (Istio rejects an overlapping exact host). TLS terminates
+upstream at the gateway NLB (ACM cert); the gateway forwards plain HTTP, so the
+ClusterIP Service and the env settings above are unchanged. The nginx `Ingress`
+declared in `values.yaml` still exists and is the rollback path, out of the live
+DNS path. See [25-istio-service-mesh.md](25-istio-service-mesh.md) and
+[40-identity-keycloak.md](40-identity-keycloak.md).
+
+Mesh note: the `coder` namespace is labeled `istio-injection=enabled` and Coder
+IS enrolled in the mesh. Because the cluster runs Kubernetes 1.36 with native
+sidecars, the `istio-proxy` runs as a restartable init container, so
+`kubectl -n coder get pod` reports the Coder pod as `2/2` with `coder` the only
+entry in `.spec.containers` and `istio-init`/`istio-proxy` under
+`.spec.initContainers` (a check of `.spec.containers` alone misleadingly looks
+like there is no sidecar). Verified live: the Coder pod's
+`sidecar.istio.io/status` annotation lists `istio-proxy` under `initContainers`,
+and `istioctl proxy-status` shows `coder-...coder` plus
+`coder-provisioner-alpha`/`-bravo` SYNCED with istiod 1.30.1. The `coder`
+VirtualService (`kubectl get virtualservice -n coder`) routes
+`*.usgov.coderdemo.io` through `istio-system/public-gateway`, and the gateway
+does mTLS to the meshed Coder workload. See
+[25-istio-service-mesh.md](25-istio-service-mesh.md).
 
 ## Access URLs
 

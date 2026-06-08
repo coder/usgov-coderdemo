@@ -73,13 +73,16 @@ Terraform resources (created by the mirror script, see below).
 | Workspace RBAC in `coder-workspaces` | `kubectl apply -f deploy/platform/workspace-rbac.yaml` | live `kubectl get role -n coder-workspaces` |
 | Keycloak Deployment/Service/Ingress + realm `coder` import | `kubectl apply -k deploy/keycloak/` | `deploy/keycloak/*`; live pod `keycloak` |
 | GitLab StatefulSet/Service/Ingress (embedded Postgres) | `kubectl apply -f deploy/gitlab/*` | `deploy/gitlab/*`; live pod `gitlab-0` |
-| Coder control plane | Helm release `coder` (4 revisions) + `deploy/coder/values.yaml` | live Helm release `coder.v1..v4` |
+| GitLab CI runner (Helm, non-meshed `gitlab-runner` ns) | Helm (gitlab-runner chart 0.89.1) + `deploy/gitlab-runner/values.yaml` | live Helm release `gitlab-runner.v1..v2`; `deploy/gitlab-runner/` (PR #36) |
+| GitLab Container Registry route (Istio `VirtualService` to `gitlab.gitlab.svc:5050`) | `kubectl apply -f deploy/gitlab/virtualservice-registry.yaml` | live VS `gitlab-registry`; `deploy/gitlab/virtualservice-registry.yaml` (PR #36) |
+| Coder control plane | Helm release `coder` (5 revisions) + `deploy/coder/values.yaml` | live Helm release `coder.v1..v5` |
+| Coder external provisioner daemons (`alpha`, `bravo` orgs, org-scoped keys) | `kubectl apply -f deploy/coder/provisioners.yaml` | live Deployments `coder-provisioner-alpha`/`-bravo`; `deploy/coder/provisioners.yaml`, `STATUS.md` |
 | Coder AI Gateway providers (`anthropic`, `anthropic-bedrock`) | env-seeded once, then DB-authoritative | `deploy/coder/values.yaml`; `STATUS.md` |
 | Coder classification banner (`UNCLASSIFIED - USGOVCLOUD`) | `scripts/set-appearance.sh` (runtime DB setting) | `scripts/set-appearance.sh`; `STATUS.md` |
 | Coder AI Governance add-on license | `coder licenses add` / UI (runtime JWT in DB) | `deploy/coder/README.md`; `STATUS.md` |
 | GitLab instance-wide OAuth app (id/secret -> `coder-external-auth`) | GitLab API / Rails console | `STATUS.md`; `deploy/coder/secrets.example.yaml` |
 | Coder template `claude-code` push | `coder templates push` | `coder-templates/claude-code/main.tf`; `STATUS.md` |
-| Install Istio 1.30.1 control plane + ingress gateway (own NLB, ACM cert) | `istioctl install -f deploy/istio/istio-operator.yaml` | live ns `istio-system`; `deploy/istio/README.md` |
+| Install Istio 1.30.1 control plane + ingress gateway (own NLB, ACM cert); manifests committed in repo (PR #31) | `istioctl install -f deploy/istio/istio-operator.yaml` | live ns `istio-system`; `deploy/istio/README.md` |
 | Istio `Gateway` + per-host `VirtualService`s (all hosts + Coder wildcard) | `kubectl apply -f deploy/istio/gateway/` | live `istio-system`; `deploy/istio/README.md` |
 | Mesh-wide `PeerAuthentication` PERMISSIVE then STRICT mTLS (+ per-workload carve-outs for Coder metrics 2112 / Keycloak mgmt 9000) | `kubectl apply -f deploy/istio/security/peerauthentication-*.yaml` | live; `deploy/istio/README.md` |
 | Mesh-external RDS `ServiceEntry` + `DestinationRule` (app-originated TLS) | `kubectl apply -f deploy/istio/security/serviceentry-rds.yaml -f deploy/istio/security/destinationrule-rds.yaml` | live; `deploy/istio/README.md` |
@@ -145,13 +148,18 @@ expands it with every imperative item found above. Ordered roughly by layer.
 14. Treat these as runtime/out-of-band, not Terraform: the AI Governance license
     JWT, the appearance banner DB setting, the GitLab OAuth app, and the Coder
     template push. Document them as runbook steps.
-15. Reconcile the Istio service mesh into Terraform/GitOps. Applied imperatively
-    this session: the `istioctl install` of Istio 1.30.1 (control plane + gateway
-    NLB with the ACM cert), the `Gateway` and per-host `VirtualService`s, the
-    STRICT `PeerAuthentication` (with the Coder 2112 / Keycloak 9000 carve-outs),
-    the RDS `ServiceEntry` + `DestinationRule`, the `istio-injection` namespace
-    labels for `coder` / `keycloak` / `gitlab`, the Route53 ALIAS records now
-    pointing every host at the gateway NLB, and the Kiali + Istio Grafana
+15. Reconcile the Istio service mesh into Terraform/GitOps. The mesh manifests
+    are now MERGED and committed in the repo under `deploy/istio/` (PR #31), so
+    this is no longer about authoring them, only about bringing their apply under
+    Terraform/GitOps (they are still applied imperatively via `istioctl` /
+    `kubectl`, not Terraform-managed). Committed and applied: the `istioctl
+    install` of Istio 1.30.1 (control plane + gateway NLB with the ACM cert), the
+    `Gateway` and per-host `VirtualService`s (including the GitLab Container
+    Registry route, PR #36), the STRICT `PeerAuthentication` (with the Coder 2112
+    / Keycloak 9000 carve-outs), the RDS `ServiceEntry` + `DestinationRule`, the
+    `istio-injection` namespace labels for `coder` / `keycloak` / `gitlab`, the
+    Route53 ALIAS records now pointing every host (`dev`, `auth`, `gitlab`,
+    `grafana`, `kiali`, `*`) at the gateway NLB, and the Kiali + Istio Grafana
     dashboards (plus the Keycloak `kiali` OIDC client and the read-only Grafana
     Postgres datasource). Decommissioning the now-bypassed ingress-nginx is
     tracked in issue #34. See `docs/as-built/25-istio-service-mesh.md`.

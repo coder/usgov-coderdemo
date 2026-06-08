@@ -15,7 +15,9 @@ an unauthenticated `GET /`.
 | Coder | `https://dev.usgov.coderdemo.io` | `200` (`/api/v2/buildinfo` -> `v2.34.0+3006da5`) | Owner password login or "Sign in with Keycloak". |
 | Keycloak | `https://auth.usgov.coderdemo.io` | `302` (redirect to login) | Realm `coder`; admin console at `/admin`, master realm, user `admin`. |
 | GitLab | `https://gitlab.usgov.coderdemo.io` | `302` (redirect to login) | Root login; embedded Postgres. |
-| Kiali | `https://kiali.usgov.coderdemo.io/kiali` | Keycloak SSO | Istio mesh dashboard; OpenID login via realm `coder`, anonymous access disabled. |
+| Kiali | `https://kiali.usgov.coderdemo.io/kiali` | Keycloak SSO (`/kiali/` -> `200`) | Istio mesh dashboard; OpenID login via realm `coder`, anonymous access disabled. |
+| Grafana | `https://grafana.usgov.coderdemo.io` | `302` (`/` -> `/login`; `/login` -> `200`) | Observability dashboards; Keycloak SSO or break-glass admin. See [`55-observability.md`](55-observability.md). |
+| Registry | `https://registry.usgov.coderdemo.io` | `401` (`/v2/`, auth required) | GitLab Container Registry, fronted by the Istio gateway. See [`50-gitlab-scm.md`](50-gitlab-scm.md). |
 
 Re-check any endpoint without printing secrets:
 
@@ -168,17 +170,23 @@ kubectl -n keycloak rollout status deploy/keycloak
 kubectl -n gitlab rollout status statefulset/gitlab
 kubectl -n ingress-nginx get pods                     # expect 2 controller replicas
 kubectl -n coder-workspaces get pods                  # active workspace pods
+kubectl -n monitoring get pods                        # Prometheus, Grafana, Loki, Promtail
+kubectl -n gitlab-runner get pods                     # CI runner manager
 
 # Logs and recent events when a pod is unhappy:
 kubectl -n <ns> logs <pod> --tail=200
 kubectl -n <ns> get events --sort-by=.lastTimestamp | tail -30
 ```
 
-Expected namespaces: `coder`, `coder-workspaces`, `gitlab`, `ingress-nginx`,
-`istio-system`, `keycloak`. Coder and Keycloak run 1 replica each; GitLab is the
-`gitlab-0` StatefulSet; the Istio ingress gateway runs 2 replicas in
-`istio-system` alongside `istiod` and `kiali`; ingress-nginx still runs 2
-controller replicas but is out of the DNS path (facts sheet, `STATUS.md`).
+Expected namespaces: `coder`, `coder-workspaces`, `external-secrets`, `gitlab`,
+`gitlab-runner`, `ingress-nginx`, `istio-system`, `keycloak`, `monitoring`. Coder
+and Keycloak run 1 replica each; the `coder` namespace also runs the two external
+per-org provisioner daemons (`coder-provisioner-alpha`, `coder-provisioner-bravo`);
+GitLab is the `gitlab-0` StatefulSet; `gitlab-runner` runs the CI runner manager;
+`monitoring` runs the kube-prometheus-stack plus Loki and Promtail; the Istio
+ingress gateway runs 2 replicas in `istio-system` alongside `istiod` and `kiali`;
+ingress-nginx still runs 2 controller replicas but is out of the DNS path (facts
+sheet, `STATUS.md`). Verified live this session.
 
 ## Istio service mesh (day-2 + rollback)
 
@@ -236,12 +244,21 @@ Rolling back the mesh:
    `us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0` needs an Anthropic
    agreement via the account paired with GovCloud. The proven in-GovCloud
    fallback that does invoke today is `amazon.nova-pro-v1:0` (`STATUS.md`).
-3. **No group / role sync.** Keycloak realm `coder` has no groups and no
-   group-claim mapper; Coder OIDC `group_field` and role mapping are empty.
-   Login provisions a bare account only (facts sheet).
-4. **Internal provisioners only.** 3 built-in provisioner daemons run inside the
-   coderd pod; there are no external provisioner daemons and `daemon_psk` is not
-   set (facts sheet).
+3. **IdP sync is built (not a gap).** Keycloak realm `coder` now carries the
+   org/team/role group tree, the full-path `groups` claim mapper on the `coder`
+   client, and Coder runs organization + group + role sync on every login
+   (`scripts/setup-keycloak-hierarchy.py`, `scripts/setup-coder-idp-sync.py`).
+   Verified live via the persona logins in
+   [`45-idp-sync-personas.md`](45-idp-sync-personas.md); this supersedes the
+   earlier "no group/role sync" note.
+4. **Provisioners: built-in plus per-org external.** The default org is served by
+   the built-in provisioner daemons inside the coderd pod. Each tenant org now
+   also runs its own external provisioner daemon (`coder-provisioner-alpha`,
+   `coder-provisioner-bravo` in ns `coder`, both `Running` and verified live)
+   authenticated with an org-scoped provisioner key (Secret
+   `coder-provisioner-<org>`), so no shared `daemon_psk` is used
+   (`deploy/coder/provisioners.yaml`,
+   [`45-idp-sync-personas.md`](45-idp-sync-personas.md)).
 5. **Terraform reconciliation backlog.** Several pieces were applied
    imperatively (CLI/Helm/kubectl/API) and are not yet in `terraform/`: Auto
    Mode disabled plus standard node group `mng` and node role

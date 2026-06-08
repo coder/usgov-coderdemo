@@ -138,6 +138,26 @@ it is super admin (site Owner + org-admin in all three orgs + GitLab
 Administrator + Grafana Admin), so a single Keycloak login administers the whole
 stack. `pat.platform` is a normal Platform lead (Platform org-admin only).
 
+### Verified live (this review)
+
+Read-only checks confirmed the sync backbone the matrix depends on:
+
+- `GET /api/v2/organizations` returns exactly `coder` (Platform Engineering),
+  `alpha` (Mission Partner Alpha), and `bravo` (Mission Partner Bravo).
+- `GET /api/v2/settings/idpsync/organization` reports `field=groups`,
+  `organization_assign_default=false`, and the mapping keys `/platform`,
+  `/alpha`, `/bravo`.
+- The two tenant provisioner Deployments `coder-provisioner-alpha` and
+  `coder-provisioner-bravo` are `1/1`
+  (`kubectl -n coder get deploy -l app.kubernetes.io/name=coder-provisioner`).
+- The deployment-config `oidc.group_field` is empty, confirming the legacy OIDC
+  group sync is off and the runtime per-org IdP sync is authoritative.
+
+The persona login matrix above is produced by `scripts/verify-oidc-login.py`.
+The group tree, persona memberships, and per-org group/role mappings match
+`scripts/setup-keycloak-hierarchy.py` and `scripts/setup-coder-idp-sync.py` line
+for line.
+
 ## Provisioners and templates per tenant org
 
 Each tenant org has its own external provisioner daemon

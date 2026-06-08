@@ -78,6 +78,9 @@ kubectl -n keycloak get deploy,svc,ingress
   service/keycloak           ClusterIP   8080/TCP
   ingress/keycloak           nginx       auth.usgov.coderdemo.io -> NLB
 
+kubectl -n keycloak get virtualservice
+  keycloak   ["istio-system/public-gateway"]   ["auth.usgov.coderdemo.io"]
+
 curl -sS https://auth.usgov.coderdemo.io/realms/coder/.well-known/openid-configuration
   issuer = https://auth.usgov.coderdemo.io/realms/coder   (HTTP 200)
 ```
@@ -189,7 +192,11 @@ plus the bare `https://kiali.usgov.coderdemo.io/kiali`. The script publishes the
 client secret to AWS Secrets Manager at
 `usgov-coderdemo/observability/kiali-oauth` (`{"oidc-secret"}`); ESO syncs it
 into the Kubernetes Secret `kiali` (ns `istio-system`, key `oidc-secret`) that
-Kiali reads for OpenID login, so no secret is in git.
+Kiali reads for OpenID login, so no secret is in git. Verified live: the
+`kiali-oauth` ExternalSecret reports `SecretSynced=True`
+(`kubectl get externalsecret -n istio-system`) and the `kiali` VirtualService is
+bound to `istio-system/public-gateway` for `kiali.usgov.coderdemo.io`
+(`kubectl get virtualservice -n istio-system`).
 
 Kiali consumes the client with `auth.strategy: openid`, issuer
 `https://auth.usgov.coderdemo.io/realms/coder`, scopes `openid profile email`,

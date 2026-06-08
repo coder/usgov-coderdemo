@@ -33,6 +33,16 @@ public Grafana host. The Grafana admin password was read from the synced
 Kubernetes Secret and never printed. Always target
 `https://grafana.usgov.coderdemo.io` explicitly.
 
+Re-verified live this session (read-only): the `monitoring` stack (`kps-grafana`
+3/3, Prometheus 2/2, operator 1/1, `loki` 1/1, three `promtail` pods), the Istio
+monitors in `istio-system` (`istio-component-monitor`, `envoy-stats-monitor`), the
+seven Coder + AI Governance and five Istio dashboard ConfigMaps, the three Grafana
+datasource ConfigMaps (`kps`/Prometheus, `loki`, `aibridge-postgres`), the `kiali`
+pod `Running`, and `https://grafana.usgov.coderdemo.io/login` plus
+`https://kiali.usgov.coderdemo.io/kiali/` each returning HTTP `200` over valid
+TLS. Chart `kube-prometheus-stack-86.2.0` (operator `v0.91.0`), Grafana
+`13.0.1+security-01`, and Kiali `v2.26.0` all match below.
+
 ## Coder server changes (deploy/coder/values.yaml)
 
 Four env vars were ADDED (the existing AI-provider seed env vars were left
