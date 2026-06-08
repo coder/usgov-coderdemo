@@ -168,7 +168,10 @@ curl -sS -D - -o /dev/null https://registry.usgov.coderdemo.io/v2/
 - Re-run `scripts/setup-gitlab-ci-runners.py` to rotate the Coder token and
   reconcile the project/variables/runner token in place.
 
-> Coder caps token lifetime at the server's `max_token_lifetime` (currently
-> 7 days, the default). The setup script issues the token at that maximum and is
-> safe to re-run on a schedule to rotate it. To issue longer-lived CI tokens,
-> raise `CODER_MAX_TOKEN_LIFETIME` on the Coder server.
+> Coder caps token lifetime at the server's `max_token_lifetime`. This deploy
+> sets both `CODER_MAX_TOKEN_LIFETIME` and `CODER_MAX_ADMIN_TOKEN_LIFETIME` to
+> `8760h` (1 year) in `deploy/coder/values.yaml`, so the admin-minted CI token
+> lasts a year. The setup script issues the token at that maximum and is safe
+> to re-run on a schedule to rotate it. Admin-user tokens are governed by the
+> separate `CODER_MAX_ADMIN_TOKEN_LIFETIME`; both caps must be raised for an
+> admin-minted token to exceed the 168h default.

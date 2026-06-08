@@ -156,6 +156,17 @@ coder:
     - name: CODER_DISABLE_PATH_APPS
       value: "true"
 
+    # --- API token lifetime (demo CI durability) --------------------------
+    # Raise the token caps to 1 year so the GitLab CI token ("gitlab-ci",
+    # minted on the admin user by scripts/setup-gitlab-ci-runners.py) does not
+    # expire mid-demo. Coder governs admin-user tokens with the SEPARATE
+    # CODER_MAX_ADMIN_TOKEN_LIFETIME (defaults to 168h), so both must be set
+    # for an admin-minted token to reach 1 year. Demo env only, no CUI.
+    - name: CODER_MAX_TOKEN_LIFETIME
+      value: "8760h"
+    - name: CODER_MAX_ADMIN_TOKEN_LIFETIME
+      value: "8760h"
+
     # --- AI Gateway (AI Governance Add-On) --------------------------------
     # AI Gateway is enabled by default in v2.34; set explicitly for clarity.
     # NOTE: provider env vars are deprecated and seed the DB ONCE. After the
