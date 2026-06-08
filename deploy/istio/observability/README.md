@@ -18,9 +18,14 @@ modifying either.
 | `servicemonitor-istiod.yaml` | ServiceMonitor scraping istiod control-plane metrics on the `istiod` Service port `http-monitoring` (15014). Excludes the `istiod-revision-tag-default` Service so istiod is scraped once. |
 | `podmonitor-istio-proxies.yaml` | PodMonitor scraping every Istio proxy's merged telemetry at `:15020/stats/prometheus` (the ingress gateway now; app sidecars once injected). Official Istio "Prometheus with Operator" relabeling. |
 | `dashboards-istio.yaml` | The five standard Istio dashboards as Grafana ConfigMaps (`grafana_dashboard: "1"`), sourced from the istio `release-1.30` tree. |
-| `kiali-server-values.yaml` | Helm values for the `kiali-server` chart 2.26.0 (image overridden to the ECR mirror, Prometheus/Grafana URLs, anonymous auth, web_root `/kiali`). |
+| `kiali-server-values.yaml` | Helm values for the `kiali-server` chart 2.26.0 (image overridden to the ECR mirror, Prometheus/Grafana URLs, Keycloak OpenID SSO, web_root `/kiali`, public URL settings). |
 | `kiali.yaml` | GENERATED rendered Kiali server manifest (from the chart + values). Server only, no operator. |
+| `externalsecret-kiali-oauth.yaml` | ESO ExternalSecret that syncs the Kiali OIDC client secret from AWS Secrets Manager into the `kiali` Secret (key `oidc-secret`) that Kiali reads for OpenID login. |
 | `virtualservice-kiali.yaml` | Routes `kiali.usgov.coderdemo.io` through `istio-system/public-gateway` to the `kiali` Service (20001). Manifest only; no DNS change. |
+
+The Keycloak OIDC client (`kiali`, realm `coder`) is provisioned by
+`scripts/setup-kiali-oidc.py`, which also publishes the client secret to AWS
+Secrets Manager for ESO to sync. No secret value is committed to git.
 
 Apply everything with `scripts/setup-istio-observability.sh`
 (`--verify` runs post-apply checks; `--render-kiali` regenerates `kiali.yaml`).
@@ -72,21 +77,84 @@ istio-proxy   :15020/stats/prometheus   --[PodMonitor envoy-stats-monitor]------
   orchestrator adds an additive Route53 record pointing
   `kiali.usgov.coderdemo.io` at the Istio gateway NLB, Kiali is reachable at
   **https://kiali.usgov.coderdemo.io/kiali**. Validate routing before the DNS cut
-  with `--resolve` against a gateway NLB public IP:
+  with `--resolve` against a gateway NLB public IP. Anonymous API access is
+  denied (401) and unauthenticated users are bounced to Keycloak:
   ```sh
   GIP=$(aws ec2 describe-network-interfaces \
     --filters "Name=description,Values=ELB net/k8s-istiosys-istioing-bf7bdca8c8/*" \
     --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
+  # API without a session is rejected (expect 401, NOT 200 with data):
   curl -sSk --resolve kiali.usgov.coderdemo.io:443:$GIP \
-    https://kiali.usgov.coderdemo.io/kiali/   # expect HTTP 200
+    -o /dev/null -w '%{http_code}\n' \
+    https://kiali.usgov.coderdemo.io/kiali/api/namespaces
+  # The login redirect points at the Keycloak authorize endpoint (expect 302):
+  curl -sSk --resolve kiali.usgov.coderdemo.io:443:$GIP -D - -o /dev/null \
+    https://kiali.usgov.coderdemo.io/kiali/api/auth/openid_redirect | grep -i location
   ```
 
 ## Auth
 
-Kiali uses `auth.strategy: anonymous` for the demo. **Production follow-up:**
-switch to `openid` against the same Keycloak realm (`coder`) that fronts Grafana
-and Coder (see `scripts/setup-grafana-oidc.py` for the pattern). This is not a
-demo blocker and is intentionally deferred.
+Kiali uses `auth.strategy: openid` (Keycloak OpenID Connect SSO). **Anonymous
+access is disabled.** Kiali is fronted by the same Keycloak realm (`coder`) that
+fronts Coder, Grafana, and GitLab.
+
+### How it is wired
+
+- **Keycloak client.** `scripts/setup-kiali-oidc.py` creates/updates a
+  confidential OIDC client `kiali` in realm `coder` (authorization-code flow +
+  PKCE S256), with redirect URIs `https://kiali.usgov.coderdemo.io/kiali/*` and
+  the bare `https://kiali.usgov.coderdemo.io/kiali`, plus the shared full-path
+  `groups` mapper. The script is idempotent and mirrors
+  `scripts/setup-grafana-oidc.py` / `scripts/setup-gitlab-oidc.py`.
+- **Client secret (no git secret).** The script publishes the client secret to
+  AWS Secrets Manager at `usgov-coderdemo/observability/kiali-oauth` as JSON
+  `{"oidc-secret": "..."}`. `externalsecret-kiali-oauth.yaml` syncs it (ESO,
+  ClusterSecretStore `aws-secretsmanager`) into the Secret `kiali` in
+  `istio-system` under key `oidc-secret`. That is exactly the Secret name and
+  key Kiali v2.26 OpenID reads (the kiali Deployment mounts it at
+  `/kiali-secret`). ASM is the source of truth; ESO refreshes hourly.
+- **Kiali config** (`kiali-server-values.yaml` / `kiali.yaml`):
+  - `auth.openid.issuer_uri: https://auth.usgov.coderdemo.io/realms/coder`
+  - `auth.openid.client_id: kiali`
+  - `auth.openid.username_claim: preferred_username` (labels the user in the UI)
+  - `auth.openid.scopes: [openid, profile, email]`
+  - `auth.openid.disable_rbac: true`
+  - `deployment.view_only_mode: true`
+  - `server.web_fqdn/web_port/web_schema` set to the public
+    `https://kiali.usgov.coderdemo.io:443` endpoint.
+
+### Why `disable_rbac: true` (and `view_only_mode: true`)
+
+Kiali's `openid` strategy can enforce per-user Kubernetes RBAC only when the
+cluster API server itself trusts the same OIDC issuer (so it accepts the user's
+Keycloak token). This GovCloud EKS API server is not integrated with Keycloak as
+an OIDC token issuer, so per-user RBAC is not available. `disable_rbac: true` is
+the documented setting for that case: any user who completes the Keycloak login
+may view the mesh, and Kiali queries the cluster with its own ServiceAccount.
+Because that shared ServiceAccount could otherwise mutate Istio config through
+Kiali's wizards, the install pairs it with `deployment.view_only_mode: true`, so
+the console is strictly read-only. This matches the demo goal: any authenticated
+realm user may view the mesh, nobody can change it from Kiali.
+
+The 32-byte `login_token.signing_key` the chart renders keeps Kiali on the
+authorization-code flow, which requires the `oidc-secret` Secret above.
+
+### Public URL settings (OpenID redirect)
+
+`server.web_fqdn: kiali.usgov.coderdemo.io`, `server.web_port: "443"`, and
+`server.web_schema: https` are required. Without them Kiali builds the OpenID
+`redirect_uri` from its internal listen port (`:20001`), which Keycloak would
+reject, breaking login. With them, Kiali emits
+`redirect_uri=https://kiali.usgov.coderdemo.io/kiali`, which matches the
+registered redirect URI.
+
+### Re-running / rotating
+
+Re-run `scripts/setup-kiali-oidc.py` to reconcile the client and re-publish the
+current secret; it does not rotate the Keycloak secret on each run. After a
+secret change, ESO re-syncs within the refresh interval (or force it with
+`kubectl -n istio-system annotate externalsecret kiali-oauth force-sync=$(date +%s) --overwrite`),
+then `kubectl -n istio-system rollout restart deploy/kiali`.
 
 ## What to show in the demo
 
@@ -115,9 +183,21 @@ Captured against the live cluster after apply:
   `pilot_proxy_convergence_time_bucket`, `galley_validation_passed`) are present.
 - Grafana lists all five Istio dashboards; the Control Plane dashboard's
   `pilot_xds` query returns data through Grafana's Prometheus datasource.
-- Kiali v2.26.0 pod is `Running`; `/kiali/api/istio/status` reports istiod,
-  istio-ingressgateway, Prometheus, Grafana, and custom dashboards all `Healthy`;
-  the graph API returns the mesh.
-- `https://kiali.usgov.coderdemo.io/kiali/` returns HTTP 200 through every
-  gateway NLB IP (validated with `--resolve`); `/` 302-redirects to the `https`
-  `/kiali/` URL.
+- Kiali v2.26.0 pod is `Running`; `/kiali/healthz` returns 200 and the pod log
+  reports `Using authentication strategy [openid]` and `Using OpenID
+  auto-discovery from provider`.
+- **Anonymous access is denied.** With no session, `/kiali/api/namespaces`,
+  `/kiali/api/istio/status`, and `/kiali/api/config` return **401** (previously
+  200 with data), and `/kiali/api/auth/info` reports `strategy: openid`. Verified
+  both via port-forward and through every gateway NLB IP with `--resolve`.
+- **Unauthenticated users are redirected to Keycloak.**
+  `/kiali/api/auth/openid_redirect` returns 302 to
+  `https://auth.usgov.coderdemo.io/realms/coder/protocol/openid-connect/auth`
+  with `client_id=kiali`, `response_type=code`, `code_challenge_method=S256`
+  (PKCE), and `redirect_uri=https://kiali.usgov.coderdemo.io/kiali`. Following
+  that authorize URL returns the realm `coder` login page (HTTP 200, no
+  `invalid redirect_uri` error), confirming the client and redirect URI are
+  accepted end-to-end.
+- **Still manual:** a full browser login (entering Keycloak credentials and
+  landing in the Kiali UI) is best confirmed interactively in a browser; the
+  headless checks above prove everything up to the credential prompt.

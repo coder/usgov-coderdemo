@@ -12,9 +12,11 @@
 # Server-only install (no Kiali operator). The single container image is the
 # private ECR mirror quay/kiali/kiali:v2.26.0 (scripts/images.txt), so nothing
 # is pulled from quay.io at runtime. Kiali reads the in-cluster kube-prometheus
-# Prometheus and links to the kube-prometheus Grafana; auth is anonymous for the
-# demo (Keycloak OpenID SSO is the production follow-up). It serves under
-# /kiali and is exposed through the Istio gateway by virtualservice-kiali.yaml.
+# Prometheus and links to the kube-prometheus Grafana. Auth is Keycloak OpenID
+# Connect SSO (realm "coder"); anonymous access is disabled. The OIDC client
+# secret arrives via ESO in the Secret "kiali" (externalsecret-kiali-oauth.yaml).
+# It serves under /kiali and is exposed through the Istio gateway by
+# virtualservice-kiali.yaml.
 ---
 # Source: kiali-server/templates/networkpolicy.yaml
 apiVersion: networking.k8s.io/v1
@@ -84,10 +86,18 @@ data:
       icon_annotation: kiali.io/api-type
       title: API Documentation
     auth:
-      openid: {}
+      openid:
+        client_id: kiali
+        disable_rbac: true
+        issuer_uri: https://auth.usgov.coderdemo.io/realms/coder
+        scopes:
+        - openid
+        - profile
+        - email
+        username_claim: preferred_username
       openshift:
         client_id_prefix: kiali
-      strategy: anonymous
+      strategy: openid
     chat_ai:
       default_provider: ""
       enabled: false
@@ -184,7 +194,7 @@ data:
       tolerations: []
       topology_spread_constraints: []
       version_label: v2.26.0
-      view_only_mode: false
+      view_only_mode: true
     external_services:
       custom_dashboards:
         enabled: true
@@ -209,7 +219,7 @@ data:
         ignore:
         - KIA1301
     login_token:
-      signing_key: ccexuL644Kk3UPPMwDA3x5HsdN9VdK5c
+      signing_key: XzVbyI9aroe2OLWSxHIIqiVk2927ceKR
     server:
       observability:
         metrics:
@@ -219,15 +229,18 @@ data:
             max_consecutive_na: 3
           port: 9090
       port: 20001
+      web_fqdn: kiali.usgov.coderdemo.io
+      web_port: "443"
       web_root: /kiali
+      web_schema: https
     skipResources: []
 ...
 ---
-# Source: kiali-server/templates/role.yaml
+# Source: kiali-server/templates/role-viewer.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: kiali
+  name: kiali-viewer
   labels:
     
     helm.sh/chart: kiali-server-2.26.0
@@ -257,7 +270,6 @@ rules:
   - get
   - list
   - watch
-  - patch
 - apiGroups: [""]
   resources:
   - pods/portforward
@@ -274,7 +286,6 @@ rules:
   - get
   - list
   - watch
-  - patch
 - apiGroups: ["batch"]
   resources:
   - cronjobs
@@ -283,7 +294,6 @@ rules:
   - get
   - list
   - watch
-  - patch
 - apiGroups:
   - networking.istio.io
   - security.istio.io
@@ -296,9 +306,6 @@ rules:
   - get
   - list
   - watch
-  - create
-  - delete
-  - patch
 - apiGroups: ["apps.openshift.io"]
   resources:
   - deploymentconfigs
@@ -306,7 +313,6 @@ rules:
   - get
   - list
   - watch
-  - patch
 - apiGroups: ["route.openshift.io"]
   resources:
   - routes
@@ -337,7 +343,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: kiali
+  name: kiali-viewer
   labels:
     
     helm.sh/chart: kiali-server-2.26.0
@@ -350,7 +356,7 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: kiali
+  name: kiali-viewer
 subjects:
 - kind: ServiceAccount
   name: kiali
@@ -373,6 +379,7 @@ metadata:
     app.kubernetes.io/version: "v2.26.0"
     app.kubernetes.io/part-of: "kiali"
   annotations:
+    kiali.io/external-url: "https://kiali.usgov.coderdemo.io:443/kiali"
 spec:
   ports:
   - name: http
@@ -428,7 +435,7 @@ spec:
         app.kubernetes.io/part-of: "kiali"
         sidecar.istio.io/inject: "false"
       annotations:
-        checksum/config: 0864cfc0a047b1b72035be394880ac9f242bae20763c539549e4e805b55f2540
+        checksum/config: f71d89d2a00e63daba53a0ef4efffa34ac80ebe832648b755c2a6bb48b5611a1
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
         prometheus.io/scheme: "http"

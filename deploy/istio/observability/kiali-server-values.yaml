@@ -26,6 +26,12 @@ deployment:
   # Single demo replica; read the whole cluster for the mesh graph.
   replicas: 1
   cluster_wide_access: true
+  # Every authenticated Keycloak user shares Kiali's own ServiceAccount for
+  # cluster reads (auth.openid.disable_rbac below), so make the console strictly
+  # read-only. This prevents any logged-in realm user from mutating mesh config
+  # through Kiali wizards. The mesh graph, mTLS badges, and dashboards remain
+  # fully visible.
+  view_only_mode: true
   # Kiali is reached through the Istio ingress gateway VirtualService
   # (virtualservice-kiali.yaml), not a Kubernetes Ingress.
   ingress_enabled: false
@@ -39,12 +45,38 @@ deployment:
     limits:
       memory: 1Gi
 
-# Demo auth: anonymous. PRODUCTION FOLLOW-UP: switch auth.strategy to "openid"
-# and wire Kiali to the same Keycloak realm ("coder") that fronts Grafana and
-# Coder (see scripts/setup-grafana-oidc.py for the pattern). Not a blocker for
-# the demo; tracked separately.
+# Auth: Keycloak OpenID Connect SSO. Kiali is fronted by the same Keycloak realm
+# ("coder") that fronts Coder, Grafana, and GitLab. Anonymous access is OFF: the
+# console redirects unauthenticated users to Keycloak's authorization endpoint.
+#
+# The confidential OIDC client "kiali" is provisioned by scripts/setup-kiali-oidc.py
+# (authorization-code flow + PKCE S256). The client secret is stored in AWS
+# Secrets Manager (usgov-coderdemo/observability/kiali-oauth) and synced by ESO
+# into the Secret "kiali" (ns istio-system) under key "oidc-secret", which Kiali
+# reads automatically (externalsecret-kiali-oauth.yaml).
+#
+# disable_rbac: true is required here. This GovCloud EKS API server is not
+# integrated with Keycloak as an OIDC token issuer, so per-user Kubernetes RBAC
+# cannot validate realm tokens. With disable_rbac true, any user who completes
+# the Keycloak login may view the mesh, and Kiali queries the cluster with its
+# own ServiceAccount. deployment.view_only_mode true (above) keeps that shared
+# access read-only.
+#
+# The 32-byte login_token.signing_key the chart renders keeps Kiali on the
+# authorization-code flow, so the oidc-secret Secret is required.
 auth:
-  strategy: anonymous
+  strategy: openid
+  openid:
+    issuer_uri: https://auth.usgov.coderdemo.io/realms/coder
+    client_id: kiali
+    # preferred_username is delivered by Keycloak's default "profile" client
+    # scope; it labels the logged-in user in the Kiali UI.
+    username_claim: preferred_username
+    scopes:
+    - openid
+    - profile
+    - email
+    disable_rbac: true
 
 external_services:
   # Istio control-plane (istiod) lives in istio-system.
@@ -68,3 +100,10 @@ server:
   port: 20001
   # Serve under /kiali so the gateway host exposes https://<host>/kiali.
   web_root: /kiali
+  # Tell Kiali its PUBLIC URL so OpenID redirect URIs are built correctly.
+  # Without this Kiali guesses the redirect_uri from its internal listen port
+  # (20001) and OIDC login fails. Behind the NLB+gateway, the public endpoint is
+  # https://kiali.usgov.coderdemo.io/kiali on 443.
+  web_fqdn: kiali.usgov.coderdemo.io
+  web_port: "443"
+  web_schema: https
