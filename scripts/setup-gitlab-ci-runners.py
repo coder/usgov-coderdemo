@@ -64,6 +64,16 @@ RUNNER_DESC = "coder-templates k8s runner (usgov-coderdemo demo)"
 REGION = "us-gov-west-1"
 ASM_RUNNER = "usgov-coderdemo/gitlab/runner"
 
+# Container Registry pre-seed: the air-gapped supply chain is
+# docker.io -> ECR -> the project's GitLab Container Registry. The Kaniko CI
+# job then builds FROM the GitLab CR copy using only the CI job token.
+ECR_REGISTRY = "430737322961.dkr.ecr.us-gov-west-1.amazonaws.com"
+ECR_BASE_IMAGE = ECR_REGISTRY + "/docker-hub/library/debian:bookworm-slim"
+REGISTRY_HOST = "registry.usgov.coderdemo.io"
+CR_BASE_IMAGE = REGISTRY_HOST + "/root/coder-templates/workspace-base:bookworm-slim"
+REGISTRY_PAT_NAME = "coder-templates-ci-registry"
+POD_PAT_FILE = "/tmp/gl-registry-pat"
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SEED_DIR = os.path.join(REPO_ROOT, "deploy", "gitlab-runner",
                         "coder-templates-example")
@@ -189,9 +199,8 @@ def rails(ruby, env_lines=None):
 
 
 # --- Ruby payloads -----------------------------------------------------------
-RUBY_PROJECT_AND_RUNNER = r'''
+RUBY_ENSURE_PROJECT = r'''
 root = User.find_by(username: "root") or abort("root user not found")
-
 path  = "%(name)s"
 full  = "%(full)s"
 # Find or create the project in root's personal namespace.
@@ -211,6 +220,11 @@ if project.nil?
 else
   puts "project #{full}: exists id=#{project.id}"
 end
+'''
+
+RUBY_SEED_PROTECT_RUNNER = r'''
+root = User.find_by(username: "root") or abort("root user not found")
+project = Project.find_by_full_path("%(full)s") or abort("project not found")
 
 # Seed files from the staged directory. Only files that are new or whose
 # content differs become commit actions, so a re-run with identical content is
@@ -305,6 +319,26 @@ var.save!
 puts "ci variable #{key}: masked=#{var.masked} protected=#{var.protected}"
 '''
 
+RUBY_REGISTRY_PAT = r'''
+root = User.find_by(username: "root") or abort("root user not found")
+# Rotate a root PAT scoped to the registry so crane can pre-seed the base into
+# the project Container Registry. The raw token is readable only right after
+# creation, so rotate on each run and stage it to a 0600 file for out-of-band
+# retrieval (never printed).
+name = "%(patname)s"
+old = root.personal_access_tokens.find_by(name: name)
+old&.revoke!
+pat = root.personal_access_tokens.create!(
+  name: name,
+  scopes: ["read_registry", "write_registry"],
+  expires_at: 7.days.from_now
+)
+File.open("%(patfile)s", File::WRONLY | File::CREAT | File::TRUNC, 0o600) do |f|
+  f.write(pat.token.to_s)
+end
+puts "registry PAT: rotated (scopes read/write_registry, 7d)"
+'''
+
 
 # --- AWS Secrets Manager -----------------------------------------------------
 def asm_exists(name):
@@ -339,6 +373,57 @@ def asm_put(name, payload):
         os.unlink(path)
 
 
+# --- Container Registry base pre-seed (crane: ECR -> GitLab CR) ---------------
+def registry_pat():
+    """Rotate a registry-scoped root PAT and return it (captured, never echoed)."""
+    r = rails(RUBY_REGISTRY_PAT % {"patname": REGISTRY_PAT_NAME,
+                                   "patfile": POD_PAT_FILE})
+    sys.stdout.write(r.stdout)
+    if r.returncode != 0:
+        sys.stderr.write(r.stderr)
+        return None
+    got = kubectl(["exec", "-i", "-c", CONTAINER, POD, "--",
+                   "sh", "-c", f"cat {POD_PAT_FILE}"])
+    pat = (got.stdout or "").strip()
+    kubectl(["exec", "-c", CONTAINER, POD, "--", "rm", "-f", POD_PAT_FILE])
+    return pat or None
+
+
+def preseed_base(pat):
+    """Copy the base image from the ECR mirror into the project's GitLab
+    Container Registry with crane, so the Kaniko CI job can build FROM it using
+    only the CI job token. Idempotent (crane copy is a no-op if the digest
+    already matches). Non-fatal: a failure is reported but does not block the
+    rest of the setup."""
+    import shutil
+    crane = shutil.which("crane")
+    if not crane:
+        print("WARN: crane not found in PATH; skipping CR base pre-seed")
+        return False
+    pw = subprocess.run(["aws", "ecr", "get-login-password", "--region", REGION],
+                        capture_output=True, text=True)
+    if pw.returncode != 0:
+        print("WARN: aws ecr get-login-password failed; skipping pre-seed")
+        return False
+    if subprocess.run([crane, "auth", "login", ECR_REGISTRY, "-u", "AWS",
+                       "--password-stdin"], input=pw.stdout, text=True,
+                      capture_output=True).returncode != 0:
+        print("WARN: crane ECR login failed; skipping pre-seed")
+        return False
+    if subprocess.run([crane, "auth", "login", REGISTRY_HOST, "-u", "root",
+                       "--password-stdin"], input=pat, text=True,
+                      capture_output=True).returncode != 0:
+        print("WARN: crane GitLab CR login failed; skipping pre-seed")
+        return False
+    cp = subprocess.run([crane, "copy", ECR_BASE_IMAGE, CR_BASE_IMAGE],
+                        capture_output=True, text=True)
+    if cp.returncode != 0:
+        print("WARN: crane copy ECR -> GitLab CR failed:\n" + cp.stderr.strip())
+        return False
+    print(f"CR base: {CR_BASE_IMAGE} (pre-seeded from ECR mirror)")
+    return True
+
+
 # --- Main --------------------------------------------------------------------
 def main():
     secrets = read_secret("CODER_ADMIN_EMAIL", "CODER_ADMIN_PASSWORD")
@@ -362,18 +447,46 @@ def main():
         sys.exit(1)
     print(f"staged example project -> {POD}:{POD_SEED_DIR}")
 
-    # 3. Project + seed + protect + runner token.
-    ruby = RUBY_PROJECT_AND_RUNNER % {
-        "name": PROJECT_NAME, "full": PROJECT_PATH, "desc": PROJECT_DESC,
-        "seed": POD_SEED_DIR, "rdesc": RUNNER_DESC, "tokenfile": POD_TOKEN_FILE,
-    }
-    r = rails(ruby)
+    # 3. Ensure the project exists (needed before the CR base pre-seed).
+    r = rails(RUBY_ENSURE_PROJECT % {
+        "name": PROJECT_NAME, "full": PROJECT_PATH, "desc": PROJECT_DESC})
     sys.stdout.write(r.stdout)
     if r.returncode != 0:
         sys.stderr.write(r.stderr)
         sys.exit(r.returncode)
 
-    # 4. Retrieve the runner token (captured, never echoed) -> ASM.
+    # 4. Pre-seed the Kaniko base image into the project's GitLab Container
+    #    Registry (ECR -> CR) BEFORE the seed commit triggers the pipeline, so
+    #    the build-workspace-image job can build FROM it with only the CI job
+    #    token. Non-fatal if the registry is not reachable yet.
+    pat = registry_pat()
+    if pat:
+        preseed_base(pat)
+    else:
+        print("WARN: could not obtain a registry PAT; skipping CR base pre-seed")
+
+    # 5. Set the masked + protected CODER_SESSION_TOKEN CI/CD variable BEFORE the
+    #    seed commit. The seed commit (step 6) triggers a pipeline, and that
+    #    pipeline must read the token rotated in step 1. Setting the variable
+    #    after the commit would race the pipeline against a just-deleted token,
+    #    failing `coder whoami` with "session expired".
+    ruby_var = RUBY_SET_CI_VARIABLE % {"full": PROJECT_PATH}
+    r = rails(ruby_var, env_lines=[coder_token])
+    sys.stdout.write(r.stdout)
+    if r.returncode != 0:
+        sys.stderr.write(r.stderr)
+        sys.exit(r.returncode)
+
+    # 6. Seed files (commit -> pipeline) + protect branch + runner token.
+    r = rails(RUBY_SEED_PROTECT_RUNNER % {
+        "full": PROJECT_PATH, "seed": POD_SEED_DIR,
+        "rdesc": RUNNER_DESC, "tokenfile": POD_TOKEN_FILE})
+    sys.stdout.write(r.stdout)
+    if r.returncode != 0:
+        sys.stderr.write(r.stderr)
+        sys.exit(r.returncode)
+
+    # 7. Retrieve the runner token (captured, never echoed) -> ASM.
     got = kubectl(["exec", "-i", "-c", CONTAINER, POD, "--",
                    "sh", "-c", f"cat {POD_TOKEN_FILE}"])
     runner_token = (got.stdout or "").strip()
@@ -386,14 +499,6 @@ def main():
         "runner-registration-token": "",
     })
     print(f"ASM {ASM_RUNNER}: {action} (runner-token, {len(runner_token)} chars)")
-
-    # 5. Set the masked + protected CODER_SESSION_TOKEN CI/CD variable.
-    ruby_var = RUBY_SET_CI_VARIABLE % {"full": PROJECT_PATH}
-    r = rails(ruby_var, env_lines=[coder_token])
-    sys.stdout.write(r.stdout)
-    if r.returncode != 0:
-        sys.stderr.write(r.stderr)
-        sys.exit(r.returncode)
 
     # Cleanup staged files.
     kubectl(["exec", "-c", CONTAINER, POD, "--", "rm", "-rf", POD_SEED_DIR])

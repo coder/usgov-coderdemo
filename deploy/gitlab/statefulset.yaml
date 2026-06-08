@@ -174,8 +174,28 @@ spec:
                 prometheus_monitoring['enable'] = false
                 puma['exporter_enabled'] = false
                 sidekiq['metrics_enabled'] = false
-                ## Services not needed for this demo.
-                registry['enable'] = false
+                ## ---- Container Registry ----
+                ## Enabled for the demo image-builder CI job (Kaniko pushes here).
+                ## TLS terminates upstream at the NLB / Istio gateway (the
+                ## wildcard *.usgov.coderdemo.io ACM cert already covers
+                ## registry.usgov.coderdemo.io), so the bundled registry NGINX
+                ## speaks plain HTTP on :5050 and trusts the forwarded-proto
+                ## header, exactly like the main GitLab vhost above. The registry
+                ## process keeps its default 127.0.0.1:5000 listener; the
+                ## registry NGINX vhost proxies :5050 -> the registry. External
+                ## clients reach it at https://registry.usgov.coderdemo.io
+                ## (NLB:443 -> Istio gateway -> gitlab Service :5050). Image refs
+                ## are therefore registry.usgov.coderdemo.io/<group>/<project>.
+                registry_external_url 'https://registry.usgov.coderdemo.io'
+                registry['enable'] = true
+                registry['registry_http_addr'] = '127.0.0.1:5000'
+                registry_nginx['listen_port'] = 5050
+                registry_nginx['listen_https'] = false
+                registry_nginx['redirect_http_to_https'] = false
+                registry_nginx['proxy_set_headers'] = {
+                  'X-Forwarded-Proto' => 'https',
+                  'X-Forwarded-Ssl' => 'on'
+                }
                 gitlab_pages['enable'] = false
                 gitlab_kas['enable'] = false
                 ## Return freed memory to the OS sooner (memory-constrained tuning).
@@ -183,6 +203,9 @@ spec:
           ports:
             - name: http
               containerPort: 80
+              protocol: TCP
+            - name: http-registry
+              containerPort: 5050
               protocol: TCP
           volumeMounts:
             - name: etc-gitlab

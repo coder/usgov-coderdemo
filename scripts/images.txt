@@ -29,6 +29,20 @@ docker.io/codercom/enterprise-base:ubuntu-noble-20260601
 docker.io/gitlab/gitlab-runner:v19.0.1
 docker.io/gitlab/gitlab-runner-helper:x86_64-v19.0.1
 
+# Kaniko image builder for the docker-image-builder CI job (deploy/gitlab-runner).
+# The -debug variant ships a busybox shell at /busybox, which the GitLab CI
+# Kubernetes executor needs to run the job script. Builds run rootless and
+# unprivileged (no docker-in-docker), and push to the in-cluster GitLab
+# Container Registry. Mapping: gcr.io/X -> <ecr>/gcr/X.
+gcr.io/kaniko-project/executor:v1.24.0-debug
+
+# Base image for the sample custom workspace image built by the Kaniko CI job.
+# Air-gapped supply chain: docker.io -> ECR (here) -> the project's GitLab
+# Container Registry (pre-seeded by scripts/setup-gitlab-ci-runners.py). The
+# Kaniko job then builds FROM the GitLab CR copy using only the CI job token, so
+# no external/base-registry credentials are needed in the build.
+docker.io/library/debian:bookworm-slim
+
 # --- External Secrets Operator (deploy/platform/external-secrets) ---
 # Controller, webhook, and cert-controller all use this single image.
 ghcr.io/external-secrets/external-secrets:v2.6.0
