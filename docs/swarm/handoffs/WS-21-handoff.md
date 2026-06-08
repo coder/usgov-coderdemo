@@ -1,6 +1,6 @@
 # WS-21 handoff
 
-- **Status:** APPLIED + VERIFIED (root applied 2026-06-08; gate and content confirmed live)
+- **Status:** APPLIED + VERIFIED (root applied 2026-06-08; gate and content confirmed live). PKCE login fix applied 2026-06-08 (see "Login 403 invalid_request fix" below); OIDC login now authenticates successfully. One downstream ingress buffer issue surfaced (502 on the authenticated callback), tracked below as a remaining blocker outside this workstream's file scope.
 
 ## Applied result (root, 2026-06-08)
 Ran `python3 scripts/setup-envdocs.py` (full install). Created Keycloak client
@@ -21,10 +21,54 @@ Verified live:
   serves HTTP 200, title `usgov-coderdemo Environment Docs`; diagram pages embed
   Mermaid (`/architecture/` 3 refs, `/access-and-auth/` 2 refs).
 
-Note (non-blocking hardening): oauth2-proxy v7.7.1 does not send a PKCE
-`code_challenge` by default, so the S256 flow on the confidential `envdocs`
-client is not exercised. The client uses a client secret, so this is optional;
-to enable PKCE add `--code-challenge-method=S256` to the oauth2-proxy args.
+Note: PKCE is now enabled in oauth2-proxy (see the fix section below), so the
+S256 flow on the confidential `envdocs` client is exercised end to end.
+
+## Login 403 invalid_request fix (2026-06-08)
+
+**Symptom:** signing in returned `403 Forbidden`, `Login Failed: The upstream
+identity provider returned an error: invalid_request`.
+
+**Confirmed root cause:** the Keycloak `envdocs` client has attribute
+`pkce.code.challenge.method=S256`, which makes the realm REQUIRE PKCE on the
+authorization code flow. oauth2-proxy v7.7.1 does not send a `code_challenge`
+unless explicitly configured, so Keycloak rejected the authorize request. The
+oauth2-proxy log captured the exact provider response on the callback:
+`error=invalid_request&error_description=Missing parameter: code_challenge_method`.
+
+**Fix applied (option A, more secure):** enabled PKCE in oauth2-proxy rather
+than relaxing the Keycloak client. The deployment configures oauth2-proxy via
+environment variables, so the equivalent of `--code-challenge-method=S256` was
+added to `deploy/envdocs/oauth2-proxy.yaml` as
+`OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256`, then
+`kubectl apply -f deploy/envdocs/oauth2-proxy.yaml` and a rollout. The Keycloak
+client was left unchanged (still S256), so `scripts/setup-envdocs.py`
+`DESIRED_CLIENT` already matches and a re-run stays consistent; no script change
+was needed.
+
+**Verification (live):**
+- `GET /` returns 302 to `/oauth2/start`; `/oauth2/start` returns 302 to the
+  Keycloak authorize URL, which now includes `code_challenge=...` and
+  `code_challenge_method=S256`.
+- Scripted cookie-jar OIDC login as realm `coder` user `demo`: oauth2-proxy
+  logged `[AuthSuccess] Authenticated via OAuth2` for `demo@usgov.coderdemo.io`
+  and the `/oauth2/callback` PKCE code exchange against Keycloak succeeded
+  (HTTP 302 at the application layer). The original `invalid_request` no longer
+  occurs. oauth2-proxy pod is 1/1 Running after the change.
+
+**Remaining blocker (separate issue, outside this workstream's file scope):**
+the authenticated `/oauth2/callback` intermittently returns `502 Bad Gateway`
+before the browser reaches the site. ingress-nginx logs the cause:
+`upstream sent too big header while reading response header from upstream` on
+the callback. oauth2-proxy sets a large session `Set-Cookie` (it stores the
+id_token and refresh_token), and the `envdocs-oauth2` Ingress has no
+`proxy-buffer-size` annotation, so the controller default (~4k) is too small.
+This is pre-existing and was only exposed once the PKCE fix let login progress
+past the authorize step. Recommended fix (in `deploy/envdocs/ingress.yaml`, not
+edited here): add to the `envdocs-oauth2` Ingress
+`nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"` (and optionally
+`nginx.ingress.kubernetes.io/proxy-buffers-number: "4"`). Full browser login to
+HTTP 200 should be re-verified after that annotation is applied.
 
 Rollback: `kubectl delete namespace envdocs`; delete the Keycloak `envdocs`
 client; delete the Route53 A record `envdocs.usgov.coderdemo.io`; optionally

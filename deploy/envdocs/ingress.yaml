@@ -23,6 +23,10 @@ metadata:
     app.kubernetes.io/part-of: usgov-coderdemo
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    # oauth2-proxy sets a large session cookie (id_token + refresh_token) on the
+    # /oauth2/callback response. Raise the proxy buffer so ingress-nginx does not
+    # 502 with "upstream sent too big header".
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
 spec:
   ingressClassName: nginx
   rules:
@@ -51,6 +55,9 @@ metadata:
     nginx.ingress.kubernetes.io/auth-url: "http://oauth2-proxy.envdocs.svc.cluster.local:4180/oauth2/auth"
     nginx.ingress.kubernetes.io/auth-signin: "https://envdocs.usgov.coderdemo.io/oauth2/start?rd=$escaped_request_uri"
     nginx.ingress.kubernetes.io/auth-response-headers: "X-Auth-Request-User, X-Auth-Request-Email"
+    # The auth subrequest to oauth2-proxy returns the large session cookie
+    # headers; raise the proxy buffer to avoid a 502 on the gated app response.
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
 spec:
   ingressClassName: nginx
   rules:

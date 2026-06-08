@@ -64,6 +64,12 @@ spec:
               value: "*"
             - name: OAUTH2_PROXY_SCOPE
               value: "openid email profile"
+            # Keycloak client envdocs has pkce.code.challenge.method=S256, so
+            # the realm requires PKCE on the authorization code flow. oauth2-proxy
+            # does not send a code_challenge unless this is set, which otherwise
+            # makes Keycloak reject the flow with invalid_request.
+            - name: OAUTH2_PROXY_CODE_CHALLENGE_METHOD
+              value: "S256"
             - name: OAUTH2_PROXY_HTTP_ADDRESS
               value: "0.0.0.0:4180"
             # Trust X-Forwarded-* from ingress-nginx; serve as the auth backend.
