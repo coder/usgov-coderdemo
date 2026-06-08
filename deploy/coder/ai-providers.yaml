@@ -66,48 +66,50 @@ providers:
       # invocable (HTTP 200) against the live aibridge anthropic route
       # before being listed here. Display names are prefixed "(direct)" so
       # the picker makes the direct-vs-Bedrock distinction obvious. The 4.x
-      # Claude tiers are 200K context. Claude Sonnet 4.5 stays the single
-      # default.
+      # Claude tiers are 200K context.
+      # Curated for the demo (going direct): only the two flagship direct models
+      # are enabled in the picker, Opus 4.8 and Sonnet 4.6 (the demo default).
+      # The rest stay listed here disabled so re-enabling is a one-line flip.
       - model: "claude-opus-4-8"
         display_name: "(direct) Claude Opus 4.8"
-        enabled: true
-        context_limit: 200000
-      - model: "claude-opus-4-7"
-        display_name: "(direct) Claude Opus 4.7"
-        enabled: true
-        context_limit: 200000
-      - model: "claude-opus-4-6"
-        display_name: "(direct) Claude Opus 4.6"
-        enabled: true
-        context_limit: 200000
-      - model: "claude-opus-4-5-20251101"
-        display_name: "(direct) Claude Opus 4.5"
-        enabled: true
-        context_limit: 200000
-      - model: "claude-opus-4-1-20250805"
-        display_name: "(direct) Claude Opus 4.1"
-        enabled: true
-        context_limit: 200000
-      - model: "claude-opus-4-20250514"
-        display_name: "(direct) Claude Opus 4"
         enabled: true
         context_limit: 200000
       - model: "claude-sonnet-4-6"
         display_name: "(direct) Claude Sonnet 4.6"
         enabled: true
+        default: true
+        context_limit: 200000
+      - model: "claude-opus-4-7"
+        display_name: "(direct) Claude Opus 4.7"
+        enabled: false
+        context_limit: 200000
+      - model: "claude-opus-4-6"
+        display_name: "(direct) Claude Opus 4.6"
+        enabled: false
+        context_limit: 200000
+      - model: "claude-opus-4-5-20251101"
+        display_name: "(direct) Claude Opus 4.5"
+        enabled: false
+        context_limit: 200000
+      - model: "claude-opus-4-1-20250805"
+        display_name: "(direct) Claude Opus 4.1"
+        enabled: false
+        context_limit: 200000
+      - model: "claude-opus-4-20250514"
+        display_name: "(direct) Claude Opus 4"
+        enabled: false
         context_limit: 200000
       - model: "claude-sonnet-4-5-20250929"
         display_name: "(direct) Claude Sonnet 4.5"
-        enabled: true
-        default: true
+        enabled: false
         context_limit: 200000
       - model: "claude-sonnet-4-20250514"
         display_name: "(direct) Claude Sonnet 4"
-        enabled: true
+        enabled: false
         context_limit: 200000
       - model: "claude-haiku-4-5-20251001"
         display_name: "(direct) Claude Haiku 4.5"
-        enabled: true
+        enabled: false
         context_limit: 200000
 
   # --- OpenAI direct (SECONDARY) -----------------------------------------
