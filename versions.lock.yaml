@@ -7,8 +7,8 @@ domain: usgov.coderdemo.io
 ingress_mode: direct        # NLB + ACM direct to Coder. No Istio.
 
 coder:
-  version: "2.34.0"         # latest stable
-  helm_chart: "2.34.0"
+  version: "2.34.1"         # patch: Bedrock SigV4 proxy-header fix (#26053)
+  helm_chart: "2.34.1"
 
 kubernetes: "1.36"          # latest EKS-supported in us-gov-west-1
 terraform: "1.15.5"

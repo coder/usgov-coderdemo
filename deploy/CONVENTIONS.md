@@ -39,7 +39,7 @@ namespaces; your workstream only declares its own `Ingress` object.
 ## Versions (source of truth: `versions.lock.yaml`)
 
 - EKS / k8s **1.36**, PostgreSQL **18.4**
-- Coder **2.34.0** (Helm chart + `ghcr.io/coder/coder:v2.34.0`)
+- Coder **2.34.1** (Helm chart + `ghcr.io/coder/coder:v2.34.1`)
 - Keycloak **26.6.3**
 - GitLab CE **19.0.1**
 - claude-code Coder module **4.7.3**
@@ -73,10 +73,10 @@ Reference ECR images by the mirrored path. Report the upstream refs you used.
 
 Two providers configured; AI Governance Add-On license is present.
 
-1. **Anthropic-direct (PRIMARY for demo reliability)** — points at
+1. **Anthropic-direct (PRIMARY for demo reliability)**: points at
    `api.anthropic.com`; egress leaves the VPC via the NAT gateway. API key
    comes from a k8s Secret (key `ANTHROPIC_API_KEY`); never hardcode it.
-2. **Bedrock (in-boundary, SECONDARY)** — IRSA, no static keys. The Coder
+2. **Bedrock (in-boundary, SECONDARY)**: IRSA, no static keys. The Coder
    service account `coder/coder` is annotated with
    `eks.amazonaws.com/role-arn: arn:aws-us-gov:iam::430737322961:role/usgov-coderdemo-coder-bedrock`.
    Region `us-gov-west-1`; model

@@ -9,7 +9,7 @@
 #   quay.io/keycloak/keycloak:26.0    -> <ecr>/quay/keycloak/keycloak:26.0
 
 # --- Coder control plane (deploy/coder) ---
-ghcr.io/coder/coder:v2.34.0
+ghcr.io/coder/coder:v2.34.1
 
 # --- Keycloak SSO (deploy/keycloak) ---
 quay.io/keycloak/keycloak:26.6.3

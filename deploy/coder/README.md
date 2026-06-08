@@ -1,7 +1,7 @@
 # Coder control plane (`deploy/coder/`)
 
 Helm values + Ingress for the Coder dashboard at `dev.usgov.coderdemo.io`,
-pinned to **Coder v2.34.0** (official chart, `ghcr.io/coder/coder:v2.34.0`
+pinned to **Coder v2.34.1** (official chart, `ghcr.io/coder/coder:v2.34.1`
 mirrored to ECR). Read [`deploy/CONVENTIONS.md`](../CONVENTIONS.md) first.
 
 ## Files
@@ -20,7 +20,7 @@ orchestrator/platform layer must have:
 - The `coder` namespace.
 - `ingress-nginx` installed, fronted by the internet-facing **NLB + ACM cert**
   (TLS terminates at the NLB; backends are plain HTTP).
-- The ECR mirror populated with `ghcr/coder/coder:v2.34.0`
+- The ECR mirror populated with `ghcr/coder/coder:v2.34.1`
   (`scripts/mirror-images.sh`).
 - The `coder` logical DB + role on RDS (db-init job).
 - The three Secrets in `secrets.example.yaml` (`coder-db`, `coder-oidc`,
@@ -49,7 +49,7 @@ helm repo add coder-v2 https://helm.coder.com/v2
 helm repo update
 helm upgrade --install coder coder-v2/coder \
   --namespace coder \
-  --version 2.34.0 \
+  --version 2.34.1 \
   --values deploy/coder/values.yaml
 
 # 4. Apply the AI Governance Add-On license (see "Licensing" below).
@@ -75,7 +75,7 @@ Terraform apply had not run (plan: 39 to add), so `secrets.example.yaml` uses a
 
 ## AI Gateway provider schema (verified)
 
-Verified against **v2.34.0** source and docs:
+Verified against **v2.34.0** source and docs (provider schema unchanged in v2.34.1):
 
 - Docs: <https://coder.com/docs/ai-coder/ai-gateway/setup> and
   `.../ai-gateway/providers` (the AI Gateway product was formerly "AI Bridge";

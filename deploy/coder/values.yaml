@@ -1,5 +1,10 @@
-# Helm values for the official Coder chart, pinned to v2.34.0.
-# Chart + appVersion 2.34.0 (see versions.lock.yaml / deploy/CONVENTIONS.md).
+# Helm values for the official Coder chart, pinned to v2.34.1.
+# Chart + appVersion 2.34.1 (see versions.lock.yaml / deploy/CONVENTIONS.md).
+# v2.34.1 is a patch over v2.34.0 that strips Istio/Envoy proxy headers from
+# AI Gateway requests before SigV4 signing, fixing Bedrock InvokeModel 403s
+# (backport of coder/coder#26019 as #26053), and preserves gateway model
+# names (#26039). The provider seed env below is unchanged, so the upgrade
+# is seed-safe.
 #
 # Scope of this file: the Coder control-plane only. The platform layer
 # (orchestrator) owns ingress-nginx, the NLB + ACM cert, the `coder`
@@ -16,13 +21,13 @@
 # authoritative. Changing them after seeding makes coderd fail to start.
 
 coder:
-  # Image is the upstream ghcr.io/coder/coder:v2.34.0 mirrored into private
+  # Image is the upstream ghcr.io/coder/coder:v2.34.1 mirrored into private
   # ECR (no pull-through cache in GovCloud). Mirror mapping from CONVENTIONS:
-  #   ghcr.io/coder/coder:v2.34.0
-  #     -> 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/ghcr/coder/coder:v2.34.0
+  #   ghcr.io/coder/coder:v2.34.1
+  #     -> 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/ghcr/coder/coder:v2.34.1
   image:
     repo: "430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/ghcr/coder/coder"
-    tag: "v2.34.0"
+    tag: "v2.34.1"
     pullPolicy: IfNotPresent
 
   # The chart always creates a ServiceAccount named `coder`. Annotate it for
