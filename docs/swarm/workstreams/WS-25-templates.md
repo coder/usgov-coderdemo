@@ -29,11 +29,11 @@ security posture of `ai-agent-generic`. Shared invariants live in
 
 | Template | Routing description (auto-selection signal) | Base image (default) | Notable extras |
 |---|---|---|---|
-| `cpp-engineer` | C and C++ engineering workspace: clang, gcc, CMake, Ninja, gdb/lldb, valgrind. Use for C/C++ services, native libraries, and systems programming. | ECR `enterprise-base` | sudo apt toolchain |
-| `java-engineer` | Java/JVM engineering workspace: OpenJDK 21, Maven, Gradle. Use for Java and Kotlin services, Spring Boot apps, and JVM build tooling. | ECR `enterprise-base` | sudo apt toolchain |
-| `platform-engineer` | Platform/DevOps engineering workspace: kubectl, Helm, Terraform, AWS CLI, jq. Use for infrastructure-as-code, Kubernetes operations, and cloud platform work. | ECR `enterprise-base` | kubectl/helm/terraform fetch |
+| `cpp-engineer` | C/C++ workspace: clang, gcc, CMake, Ninja, gdb, valgrind. Use for C/C++ services, native libraries, and systems programming. | ECR `enterprise-base` | sudo apt toolchain |
+| `java-engineer` | Java/JVM workspace: OpenJDK 21, Maven, Gradle. Use for Java and Kotlin services, Spring Boot apps, and JVM build tooling. | ECR `enterprise-base` | sudo apt toolchain |
+| `platform-engineer` | Platform/DevOps workspace: kubectl, Helm, Terraform, AWS CLI, jq. Use for IaC, Kubernetes ops, and cloud platform work. | ECR `enterprise-base` | kubectl/helm/terraform fetch |
 | `data-scientist` | Data science workspace: Python 3, JupyterLab, pip/venv. Use for notebooks, data analysis, and ML prototyping. | ECR `enterprise-base` | JupyterLab subdomain app |
-| `ai-agent-generic` | Generic agent runtime workspace: plain compute with no in-workspace LLM tooling. Default target for server-side Coder Agents tasks that are not language-specific. | ECR `enterprise-base` | hardened: no sudo, `no_new_privs` |
+| `ai-agent-generic` | Generic agent runtime: plain compute, no LLM tooling. Default for server-side Coder Agents tasks not language-specific. | ECR `enterprise-base` | hardened: no sudo, `no_new_privs` |
 
 Base image today is the only mirrored workspace base:
 `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/codercom/enterprise-base:ubuntu-noble-20260601`.
@@ -180,7 +180,7 @@ coder delete "test-NAME" --yes
 NAME=cpp-engineer
 DISPLAY_NAME="C/C++ Engineer"
 ICON="/icon/cpp.svg"
-ROUTING_DESCRIPTION="C and C++ engineering workspace: clang, gcc, CMake, Ninja, gdb/lldb, valgrind. Use for C/C++ services, native libraries, and systems programming."
+ROUTING_DESCRIPTION="C/C++ workspace: clang, gcc, CMake, Ninja, gdb, valgrind. Use for C/C++ services, native libraries, and systems programming."
 ```
 
 `java-engineer`
@@ -189,7 +189,7 @@ ROUTING_DESCRIPTION="C and C++ engineering workspace: clang, gcc, CMake, Ninja, 
 NAME=java-engineer
 DISPLAY_NAME="Java Engineer"
 ICON="/icon/java.svg"
-ROUTING_DESCRIPTION="Java/JVM engineering workspace: OpenJDK 21, Maven, Gradle. Use for Java and Kotlin services, Spring Boot apps, and JVM build tooling."
+ROUTING_DESCRIPTION="Java/JVM workspace: OpenJDK 21, Maven, Gradle. Use for Java and Kotlin services, Spring Boot apps, and JVM build tooling."
 ```
 
 `platform-engineer`
@@ -198,7 +198,7 @@ ROUTING_DESCRIPTION="Java/JVM engineering workspace: OpenJDK 21, Maven, Gradle. 
 NAME=platform-engineer
 DISPLAY_NAME="Platform Engineer"
 ICON="/icon/kubernetes.svg"
-ROUTING_DESCRIPTION="Platform/DevOps engineering workspace: kubectl, Helm, Terraform, AWS CLI, jq. Use for infrastructure-as-code, Kubernetes operations, and cloud platform work."
+ROUTING_DESCRIPTION="Platform/DevOps workspace: kubectl, Helm, Terraform, AWS CLI, jq. Use for IaC, Kubernetes ops, and cloud platform work."
 ```
 
 `data-scientist`
@@ -216,7 +216,7 @@ ROUTING_DESCRIPTION="Data science workspace: Python 3, JupyterLab, pip/venv. Use
 NAME=ai-agent-generic
 DISPLAY_NAME="Generic Agent Runtime"
 ICON="/icon/coder.svg"
-ROUTING_DESCRIPTION="Generic agent runtime workspace: plain compute (git, shell, prebaked tools) with no in-workspace LLM tooling. Default target for server-side Coder Agents tasks that are not language-specific."
+ROUTING_DESCRIPTION="Generic agent runtime: plain compute, no LLM tooling. Default for server-side Coder Agents tasks not language-specific."
 ```
 
 ## Notes and risks for root

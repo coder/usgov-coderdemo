@@ -1,12 +1,30 @@
 # WS-25 handoff
 
-- **Status:** AUTHORED + COMMITTED; live push BLOCKED by an external github 504 (provider download), not a template defect. Static validation passed; ready to push when github egress recovers (one command per template).
+- **Status:** PUSHED + CONFIGURED (orgs coder and alpha). All 5 templates imported (terraform plan passed), display-name/icon/routing-description applied. One template bug fixed (platform-engineer heredoc escaping). Interactive build + C4 still needs a one-time GitLab OAuth login (manual).
 - **Agent:** sub-agent WS-25 (workspace template family)
 - **Timestamp:** 2026-06-08T06:28:31Z
 - **Git commit:** none (authoring sub-agent does not run git; root commits ws-2x/phase2)
 - **Branch:** ws-2x/phase2
 
-## Root attempt (2026-06-08): push blocked by external github 504
+## Resolution (2026-06-08, later): github recovered, push completed
+
+Github egress recovered. All five templates were pushed to org `coder` and org
+`alpha` (terraform plan passed for each; intermittent 504s were ridden out with
+retries). Two real issues were found and fixed during the live push, neither
+visible to `terraform fmt`:
+1. `platform-engineer` failed terraform plan because bash `${TFVER}`/`${GOARCH}`
+   in the agent `startup_script` heredoc were parsed as terraform
+   interpolations. Fixed by doubling the braces to `$${...}` (committed).
+2. `coder templates edit --description` returned HTTP 500
+   (`pq: value too long for type character varying(128)`) for four templates:
+   the template `description` column is `varchar(128)`. Descriptions were
+   shortened to <=128 characters in each `metadata.json` and in this doc's
+   per-template commands, then applied. KEEP routing descriptions <=128 chars.
+
+The routing `description`, `display_name`, and `icon` are now set on all five
+templates in both orgs (verified by the CLI `Updated template metadata` success
+and the coderd audit log). claude-code and claude-code-ci were left untouched.
+
 
 Root authenticated the coder CLI to https://dev.usgov.coderdemo.io (org via
 `CODER_ORGANIZATION` env or `--org`; the `-O` shorthand is rejected before the
@@ -56,11 +74,11 @@ Five new templates under `coder-templates/`, each with `main.tf`, `README.md`,
 
 | Template | display_name | Routing description | Base image (default) | Privilege escalation |
 |---|---|---|---|---|
-| `cpp-engineer` | C/C++ Engineer | C and C++ engineering workspace: clang, gcc, CMake, Ninja, gdb/lldb, valgrind. Use for C/C++ services, native libraries, and systems programming. | ECR `enterprise-base:ubuntu-noble-20260601` | enabled |
-| `java-engineer` | Java Engineer | Java/JVM engineering workspace: OpenJDK 21, Maven, Gradle. Use for Java and Kotlin services, Spring Boot apps, and JVM build tooling. | ECR `enterprise-base:ubuntu-noble-20260601` | enabled |
-| `platform-engineer` | Platform Engineer | Platform/DevOps engineering workspace: kubectl, Helm, Terraform, AWS CLI, jq. Use for infrastructure-as-code, Kubernetes operations, and cloud platform work. | ECR `enterprise-base:ubuntu-noble-20260601` | enabled |
+| `cpp-engineer` | C/C++ Engineer | C/C++ workspace: clang, gcc, CMake, Ninja, gdb, valgrind. Use for C/C++ services, native libraries, and systems programming. | ECR `enterprise-base:ubuntu-noble-20260601` | enabled |
+| `java-engineer` | Java Engineer | Java/JVM workspace: OpenJDK 21, Maven, Gradle. Use for Java and Kotlin services, Spring Boot apps, and JVM build tooling. | ECR `enterprise-base:ubuntu-noble-20260601` | enabled |
+| `platform-engineer` | Platform Engineer | Platform/DevOps workspace: kubectl, Helm, Terraform, AWS CLI, jq. Use for IaC, Kubernetes ops, and cloud platform work. | ECR `enterprise-base:ubuntu-noble-20260601` | enabled |
 | `data-scientist` | Data Scientist | Data science workspace: Python 3, JupyterLab, pip/venv. Use for notebooks, data analysis, and ML prototyping. | ECR `enterprise-base:ubuntu-noble-20260601` | enabled |
-| `ai-agent-generic` | Generic Agent Runtime | Generic agent runtime workspace: plain compute with no in-workspace LLM tooling. Default target for server-side Coder Agents tasks that are not language-specific. | ECR `enterprise-base:ubuntu-noble-20260601` | disabled (`no_new_privs`) |
+| `ai-agent-generic` | Generic Agent Runtime | Generic agent runtime: plain compute, no LLM tooling. Default for server-side Coder Agents tasks not language-specific. | ECR `enterprise-base:ubuntu-noble-20260601` | disabled (`no_new_privs`) |
 
 Full base-image ref:
 `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/codercom/enterprise-base:ubuntu-noble-20260601`.
@@ -133,7 +151,7 @@ coder login "$CODER_URL"
 - [x] Routing-friendly `description` per template (in metadata.json and WS-25-templates.md)
 - [x] `ai-agent-generic` hardened: `allow_privilege_escalation = false`, no sudo, egress note
 - [x] No emdash/endash/spaced double hyphen (dash-scan clean)
-- [~] **root:** `coder templates push` per template: BLOCKED by external github 504 (provider download); terraform fmt-clean, ready to push when github recovers
+- [x] **root:** `coder templates push` per template succeeds (orgs coder + alpha); terraform plan passes; platform-engineer heredoc bug fixed
 - [ ] **root:** test workspace per template reaches Connected (C4) after GitLab login
 - [ ] **root:** at least one app URL per template loads (C3); JupyterLab loads for `data-scientist`
 - [ ] **root:** Coder Agents routes each example issue to the expected template

@@ -1,6 +1,6 @@
 {
   "display_name": "Generic Agent Runtime",
-  "description": "Generic agent runtime workspace: plain compute (git, shell, prebaked tools) with no in-workspace LLM tooling. Default target for server-side Coder Agents tasks that are not language-specific.",
+  "description": "Generic agent runtime: plain compute, no LLM tooling. Default for server-side Coder Agents tasks not language-specific.",
   "icon": "/icon/coder.svg",
   "slug": "ai-agent-generic"
 }
