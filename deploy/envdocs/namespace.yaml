@@ -1,0 +1,12 @@
+# envdocs namespace.
+#
+# Reached through ingress-nginx, NOT the Istio mesh, so injection is disabled.
+# A meshed workload under mesh-wide STRICT mTLS would refuse the plaintext hop
+# from the non-meshed ingress-nginx controller and the auth subrequest path.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: envdocs
+  labels:
+    app.kubernetes.io/part-of: usgov-coderdemo
+    istio-injection: disabled

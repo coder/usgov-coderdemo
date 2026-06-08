@@ -1,0 +1,112 @@
+# envdocs static site: MkDocs Material built in-cluster, served by nginx.
+#
+# initContainer `build` renders the MkDocs sources (mounted from the
+# `envdocs-site` ConfigMap that scripts/setup-envdocs.py generates from
+# docs/envdocs/) into an emptyDir using the ECR-mirrored mkdocs-material image.
+# The Material theme bundles its CSS/JS, so the built site is self-contained
+# (Mermaid renders client-side in the reader's browser). The nginx container
+# then serves that emptyDir. Rebuilds happen on every pod start, so a content
+# change is just a ConfigMap update plus a rollout restart.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envdocs
+  namespace: envdocs
+  labels:
+    app.kubernetes.io/name: envdocs
+    app.kubernetes.io/part-of: usgov-coderdemo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: envdocs
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: envdocs
+        app.kubernetes.io/part-of: usgov-coderdemo
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: build
+          image: 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/squidfunk/mkdocs-material:9.7.6
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-euc"]
+          args:
+            - |
+              mkdir -p /build/docs
+              cp /src/mkdocs.yml /build/mkdocs.yml
+              cp /src/*.md /build/docs/
+              cd /build
+              mkdocs build --strict --site-dir /site
+          volumeMounts:
+            - name: src
+              mountPath: /src
+            - name: build
+              mountPath: /build
+            - name: site
+              mountPath: /site
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      containers:
+        - name: web
+          image: 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/library/nginx:1.27-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts:
+            - name: site
+              mountPath: /usr/share/nginx/html
+              readOnly: true
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: src
+          configMap:
+            name: envdocs-site
+        - name: build
+          emptyDir: {}
+        - name: site
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: envdocs
+  namespace: envdocs
+  labels:
+    app.kubernetes.io/name: envdocs
+    app.kubernetes.io/part-of: usgov-coderdemo
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: envdocs
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
