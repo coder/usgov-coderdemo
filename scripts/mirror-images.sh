@@ -86,6 +86,7 @@ ecr_repo_path() {
       echo "docker-hub/${rest}" ;;
     ghcr.io) echo "ghcr/${rest}" ;;
     quay.io) echo "quay/${rest}" ;;
+    gcr.io) echo "gcr/${rest}" ;;
     *.dkr.ecr.*.amazonaws.com) err "refusing to mirror an ECR ref: $ref" ;;
     *) err "unsupported upstream registry host: $host (ref: $ref)" ;;
   esac

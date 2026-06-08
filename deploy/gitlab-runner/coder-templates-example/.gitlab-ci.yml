@@ -1,0 +1,73 @@
+# =============================================================================
+# coder-templates CI: two demo jobs, both Istio-safe + air-gapped.
+# =============================================================================
+#   push-template         pushes a Coder template to the GovCloud Coder.
+#   build-workspace-image builds a custom workspace image with Kaniko and pushes
+#                         it to THIS project's GitLab Container Registry.
+#
+# Both run on the same gitlab-runner Kubernetes executor (non-meshed
+# `gitlab-runner` namespace); the executor is generic and each job picks its own
+# ECR-mirrored image. The coder CLI and Kaniko reach Coder and the GitLab
+# Container Registry over their EXTERNAL gateway URLs (mTLS terminates at the
+# Istio ingress gateway), so mesh-wide STRICT mTLS is satisfied with no
+# plaintext hop to a meshed Service.
+
+stages:
+  - deploy
+  - build-image
+
+variables:
+  CODER_URL: "https://dev.usgov.coderdemo.io"
+  CODER_TEMPLATE_NAME: "claude-code-ci"
+  CODER_ORG: "coder"
+
+# ----------------------------------------------------------------------------
+# Push a Coder template to the GovCloud Coder.
+# ----------------------------------------------------------------------------
+push-template:
+  stage: deploy
+  image:
+    name: 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/ghcr/coder/coder:v2.34.0
+    entrypoint: [""]
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - coder version
+    - coder whoami
+    - coder templates push "$CODER_TEMPLATE_NAME" --directory ./template --yes --org "$CODER_ORG"
+    - coder templates versions list "$CODER_TEMPLATE_NAME" --org "$CODER_ORG"
+
+# ----------------------------------------------------------------------------
+# Build a custom workspace image with Kaniko (rootless, unprivileged, no
+# docker-in-docker) and push it to the project's GitLab Container Registry.
+#
+# Air gap: the Kaniko image is an ECR mirror, and the Dockerfile builds FROM the
+# project's own GitLab CR copy of the base (pre-seeded from ECR by
+# scripts/setup-gitlab-ci-runners.py), so only the built-in CI job token is
+# needed and nothing is pulled from the internet.
+# ----------------------------------------------------------------------------
+build-workspace-image:
+  stage: build-image
+  image:
+    name: 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/gcr/kaniko-project/executor:v1.24.0-debug
+    entrypoint: [""]
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  variables:
+    # Base lives in this project's registry (pre-seeded from the ECR mirror).
+    BASE_IMAGE: "${CI_REGISTRY_IMAGE}/workspace-base:bookworm-slim"
+    IMAGE_TAG: "${CI_REGISTRY_IMAGE}/custom-workspace"
+  script:
+    # Write the Kaniko docker auth for the GitLab CR using the CI job token.
+    # The job token can both pull the base and push the result in this project.
+    - mkdir -p /kaniko/.docker
+    - |
+      AUTH=$(printf '%s:%s' "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" | base64 | tr -d '\n')
+      printf '{"auths":{"%s":{"auth":"%s"}}}' "$CI_REGISTRY" "$AUTH" > /kaniko/.docker/config.json
+    - /kaniko/executor
+        --context "${CI_PROJECT_DIR}/image"
+        --dockerfile "${CI_PROJECT_DIR}/image/Dockerfile"
+        --build-arg "BASE_IMAGE=${BASE_IMAGE}"
+        --destination "${IMAGE_TAG}:${CI_COMMIT_SHORT_SHA}"
+        --destination "${IMAGE_TAG}:latest"
+        --use-new-run
