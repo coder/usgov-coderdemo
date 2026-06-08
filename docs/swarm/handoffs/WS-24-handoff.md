@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | **Workstream** | WS-24 |
-| **Status** | PARTIAL (authoring complete; awaiting root apply) |
+| **Status** | APPLIED (additive, verified). Both new dashboards provisioned by Grafana; the old combined `coder-dashboard-ai-governance` was retained, not deleted (see decision below). |
 | **Author scope** | Authoring + read-only inspection only. No cluster apply, no delete, no git. |
 | **Upstream SHA** | `863d498843f86d5ac07cf9b3eb2bb27ecdda706a` (tag `v0.7.1`, repo `coder/observability`) |
 | **Upstream boundary file** | `coder-observability/templates/dashboards/_dashboards_boundary.json.tpl` |
@@ -26,6 +26,19 @@ Both replace the single combined dashboard `coder-dashboard-ai-governance`
 which is left untouched on disk for root to remove at apply time.
 
 Full panel-to-datasource mapping: `docs/swarm/workstreams/WS-24-dashboards.md`.
+
+## Applied result (root, 2026-06-08)
+
+`kubectl apply -f deploy/observability/dashboards-aibridge.yaml -f
+deploy/observability/dashboards-boundary.yaml` created both ConfigMaps. The
+Grafana sidecar wrote `/tmp/dashboards/ai-gateway.json` and
+`/tmp/dashboards/agent-firewall.json`; the grafana container logged `starting to
+provision dashboards` then `finished to provision dashboards` with no errors.
+Datasources `prometheus`, `loki`, and `aibridge-postgres` are all present, so the
+panels resolve. This was an ADDITIVE apply: the old combined
+`coder-dashboard-ai-governance` (uid `ai-governance`) was left in place so the
+current demo asset is not regressed. Deleting it is a one-line decision for the
+morning (see below); the two new dashboards fully supersede it.
 
 ## Decision flagged for root / human
 

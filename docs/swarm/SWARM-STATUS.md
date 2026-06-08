@@ -34,7 +34,7 @@
 | 21 | envdocs.usgov.coderdemo.io (KC-gated) | AUTHORED / STAGED | ws-2x/phase2 | MkDocs+oauth2-proxy+OIDC client authored, mkdocs build --strict clean; apply staged (scripts/setup-envdocs.py) |
 | 22 | Agent Firewall (Boundary) feasibility | GO (read-only complete) | ws-2x/phase2 | AL2023 kernel 6.18 supports landjail/nsjail in-pod, no AMI change; AI Governance add-on licensed; WS-22b enablement staged default-off |
 | 23 | GitLab -> Coder Agent attribution + PM persona | AUTHORING (SA running) | ws-2x/phase2 | Design + PM persona + webhook authored as STAGED; security-sensitive, needs user review before apply |
-| 24 | Upstream coder/observability dashboards | AUTHORED / STAGED | ws-2x/phase2 | New aibridge (uid ai-gateway, 33 panels) + boundary (uid agent-firewall, 16 panels) ConfigMaps; apply staged (additive, keep old until reviewed) |
+| 24 | Upstream coder/observability dashboards | APPLIED (additive) | ws-2x/phase2 | New aibridge (uid ai-gateway, 33 panels) + boundary (uid agent-firewall, 16 panels) provisioned and verified; old combined ai-governance dashboard retained pending a delete decision |
 | 25 | Workspace template family + e2e acceptance | AUTHORED / STAGED | ws-2x/phase2 | 5 EKS templates authored, terraform fmt clean; root pushes/tests live |
 
 ## Connectivity / live checks done
