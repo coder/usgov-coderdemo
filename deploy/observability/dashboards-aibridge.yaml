@@ -28,7 +28,7 @@ metadata:
   name: coder-dashboard-aibridge
   namespace: monitoring
   labels:
-    grafana_dashboard: "1"
+    grafana_dashboard: '1'
     app.kubernetes.io/part-of: usgov-coderdemo
     app.kubernetes.io/component: grafana-dashboard
 data:
@@ -1876,6 +1876,479 @@ data:
               "editorMode": "code",
               "rawQuery": true,
               "rawSql": "SELECT tu.created_at AS \"Time\", u.username AS \"User\", i.provider_name AS \"Provider\", i.model AS \"Model\", i.session_id AS \"Session ID\", tu.input_tokens AS \"Input\", tu.output_tokens AS \"Output\", tu.cache_read_input_tokens AS \"Cache Read\", tu.cache_write_input_tokens AS \"Cache Write\", ROUND((COALESCE(tu.input_tokens,0)*COALESCE(p.input_price,0) + COALESCE(tu.output_tokens,0)*COALESCE(p.output_price,0) + COALESCE(tu.cache_read_input_tokens,0)*COALESCE(p.cache_read_price,0) + COALESCE(tu.cache_write_input_tokens,0)*COALESCE(p.cache_write_price,0))::numeric/1e12, 4) AS \"Cost (USD)\" FROM aibridge_token_usages tu JOIN aibridge_interceptions i ON i.id = tu.interception_id LEFT JOIN users u ON u.id = i.initiator_id LEFT JOIN ai_model_prices p ON p.provider = i.provider AND p.model = i.model WHERE $__timeFilter(tu.created_at) ORDER BY tu.created_at DESC LIMIT 200",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "transformations": [],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "filterable": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          }
+        },
+        {
+          "id": 34,
+          "type": "row",
+          "title": "Intercepts: Tools, MCP & Prompts",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 88
+          },
+          "panels": []
+        },
+        {
+          "id": 35,
+          "type": "timeseries",
+          "title": "Tool Calls Over Time",
+          "description": "Intercepted tool-call volume per time bucket, one series per tool name, from the Coder database (aibridge_tool_usages). Shows which tools the AI Gateway is intercepting over time.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 89
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT $__timeGroupAlias(tcu.created_at, $__interval), tcu.tool AS metric, count(*) AS \"Calls\" FROM aibridge_tool_usages tcu WHERE $__timeFilter(tcu.created_at) GROUP BY 1, tcu.tool ORDER BY 1",
+              "format": "time_series",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "showPoints": "auto",
+                "spanNulls": false,
+                "axisPlacement": "auto"
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 36,
+          "type": "table",
+          "title": "Top Intercepted Tools",
+          "description": "Most-invoked tools across intercepted requests, with injected (MCP, Bridge-invoked) and invocation-error counts. Keyed on the stable tool name.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 89
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT tcu.tool AS \"Tool\", count(*) AS \"Calls\", count(*) FILTER (WHERE tcu.injected) AS \"Injected\", count(*) FILTER (WHERE tcu.invocation_error IS NOT NULL) AS \"Errors\", count(DISTINCT tcu.interception_id) AS \"Interceptions\" FROM aibridge_tool_usages tcu WHERE $__timeFilter(tcu.created_at) GROUP BY 1 ORDER BY \"Calls\" DESC LIMIT 100",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "transformations": [],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "filterable": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          }
+        },
+        {
+          "id": 37,
+          "type": "table",
+          "title": "Tool Calls by User & Model",
+          "description": "Tool-call counts broken down by user and the stable model identifier (i.model) plus provider, from aibridge_tool_usages joined to aibridge_interceptions.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 97
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT u.username AS \"User\", i.provider_name AS \"Provider\", i.model AS \"Model\", tcu.tool AS \"Tool\", count(*) AS \"Calls\" FROM aibridge_tool_usages tcu JOIN aibridge_interceptions i ON i.id = tcu.interception_id LEFT JOIN users u ON u.id = i.initiator_id WHERE $__timeFilter(tcu.created_at) GROUP BY 1,2,3,4 ORDER BY \"Calls\" DESC LIMIT 100",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "transformations": [],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "filterable": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          }
+        },
+        {
+          "id": 38,
+          "type": "table",
+          "title": "MCP Servers & Tool Sources",
+          "description": "Tool calls grouped by source. server_url names the MCP server that defined the tool; NULL (client/builtin) means the tool came from the client or a built-in, not an injected MCP server. injected=true means the AI Gateway injected and invoked it.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 97
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT COALESCE(tcu.server_url, 'client/builtin') AS \"Tool Source (MCP server_url)\", tcu.injected AS \"Injected (MCP)\", count(*) AS \"Calls\", count(DISTINCT tcu.tool) AS \"Distinct Tools\", count(*) FILTER (WHERE tcu.invocation_error IS NOT NULL) AS \"Errors\" FROM aibridge_tool_usages tcu WHERE $__timeFilter(tcu.created_at) GROUP BY 1,2 ORDER BY \"Calls\" DESC LIMIT 100",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "transformations": [],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "filterable": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          }
+        },
+        {
+          "id": 39,
+          "type": "piechart",
+          "title": "Injected vs Client Tool Calls",
+          "description": "Share of intercepted tool calls that were injected by the AI Gateway from MCP servers versus tools defined by the client or built in.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 105
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT CASE WHEN tcu.injected THEN 'Injected (MCP, Bridge-invoked)' ELSE 'Client/Built-in' END AS source, count(*) AS calls FROM aibridge_tool_usages tcu WHERE $__timeFilter(tcu.created_at) GROUP BY 1 ORDER BY 2 DESC",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "hideFrom": {
+                  "tooltip": false,
+                  "viz": false,
+                  "legend": false
+                }
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [],
+              "fields": "",
+              "values": true
+            },
+            "pieType": "pie",
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            },
+            "legend": {
+              "displayMode": "list",
+              "placement": "right",
+              "showLegend": true,
+              "values": [
+                "value",
+                "percent"
+              ]
+            },
+            "displayLabels": [
+              "name",
+              "percent"
+            ]
+          }
+        },
+        {
+          "id": 40,
+          "type": "timeseries",
+          "title": "Prompt Volume Over Time",
+          "description": "User prompt volume per time bucket, one series per provider, from aibridge_user_prompts joined to aibridge_interceptions. Series use the stable provider_name.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 16,
+            "x": 8,
+            "y": 105
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT $__timeGroupAlias(up.created_at, $__interval), i.provider_name AS metric, count(*) AS \"Prompts\" FROM aibridge_user_prompts up JOIN aibridge_interceptions i ON i.id = up.interception_id WHERE $__timeFilter(up.created_at) GROUP BY 1, i.provider_name ORDER BY 1",
+              "format": "time_series",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "showPoints": "auto",
+                "spanNulls": false,
+                "axisPlacement": "auto"
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 41,
+          "type": "bargauge",
+          "title": "Prompts by User",
+          "description": "Intercepted user-prompt counts per user over the selected range, from aibridge_user_prompts joined to aibridge_interceptions and users.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 113
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT u.username AS \"User\", count(*) AS \"Prompts\" FROM aibridge_user_prompts up JOIN aibridge_interceptions i ON i.id = up.interception_id LEFT JOIN users u ON u.id = i.initiator_id WHERE $__timeFilter(up.created_at) GROUP BY 1 ORDER BY \"Prompts\" DESC LIMIT 25",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {
+            "orientation": "horizontal",
+            "displayMode": "gradient",
+            "valueMode": "color",
+            "showUnfilled": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": true
+            }
+          }
+        },
+        {
+          "id": 42,
+          "type": "table",
+          "title": "Recent Intercepted Prompts",
+          "description": "Most recent intercepted user prompts (truncated) with user, provider, and the stable model id. Source: aibridge_user_prompts joined to aibridge_interceptions and users.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "aibridge-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 16,
+            "x": 8,
+            "y": 113
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "aibridge-postgres"
+              },
+              "editorMode": "code",
+              "rawQuery": true,
+              "rawSql": "SELECT up.created_at AS \"Time\", u.username AS \"User\", i.provider_name AS \"Provider\", i.model AS \"Model\", left(up.prompt, 300) AS \"Prompt (truncated)\" FROM aibridge_user_prompts up JOIN aibridge_interceptions i ON i.id = up.interception_id LEFT JOIN users u ON u.id = i.initiator_id WHERE $__timeFilter(up.created_at) ORDER BY up.created_at DESC LIMIT 100",
               "format": "table",
               "refId": "A"
             }
