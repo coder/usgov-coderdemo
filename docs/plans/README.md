@@ -14,6 +14,7 @@ that deployment are intended to evolve.
 | [observability-aws-native.md](observability-aws-native.md) | The production, AWS-native observability + audit target the in-cluster Prometheus/Grafana stack should evolve into: Amazon Managed Prometheus + Grafana for metrics, and CloudWatch -> Firehose -> S3 -> Athena with an optional Amazon Security Lake (OCSF) path for audit/SIEM. | #13-#20 |
 | [gitops-control-plane.md](gitops-control-plane.md) | The GitOps control plane and bootstrap: Argo CD installed in-cluster, sourcing from the in-cluster GitLab, with an app-of-apps over the existing `deploy/` paths and a non-disruptive adopt-in-place strategy. | #6-#12 |
 | [gitops-adoption.md](gitops-adoption.md) | Per-workload GitOps adoption details and the application state a GitOps controller cannot natively reconcile (Coder API config via Argo Jobs, Keycloak realm via keycloak-config-cli, AWS substrate stays Terraform). | #21-#29 |
+| [istio-implementation.md](istio-implementation.md) | Istio 1.30.1 service mesh adoption on EKS k8s 1.36: ECR-mirrored install via istioctl, an Istio ingress gateway replacing ingress-nginx behind the NLB+ACM, the Keycloak X-Forwarded-Proto cookie fix, and mesh-wide mTLS rolled PERMISSIVE then STRICT. Apply-ready manifests live in `deploy/istio/`. | #30 |
 
 ## Relationship between the plans
 

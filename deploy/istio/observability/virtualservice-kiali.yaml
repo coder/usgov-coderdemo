@@ -1,0 +1,40 @@
+# Kiali route through the shared Istio ingress Gateway.
+#
+# Binds the host kiali.usgov.coderdemo.io to the existing
+# istio-system/public-gateway and routes to the in-cluster Kiali Service
+# (kiali.istio-system:20001). The Gateway already serves this host via its
+# "*.usgov.coderdemo.io" wildcard server (deploy/istio/gateway/gateway.yaml),
+# so no Gateway change is needed.
+#
+# DNS is intentionally NOT changed here: kiali.usgov.coderdemo.io currently
+# resolves through the wildcard to the OLD ingress path. Once the orchestrator
+# adds an additive DNS record pointing kiali.usgov.coderdemo.io at the Istio
+# gateway NLB, Kiali is reachable at https://kiali.usgov.coderdemo.io/kiali.
+# Validate routing before the DNS cut with --resolve against a gateway NLB
+# public IP (see deploy/istio/observability/README.md).
+#
+# x-forwarded-proto is forced to https for parity with the other hosts: the NLB
+# terminates TLS and forwards plain HTTP, so the gateway normalizes the scheme
+# here. set (not add) overwrites any client-supplied value.
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: kiali
+  namespace: istio-system
+  labels:
+    app.kubernetes.io/part-of: usgov-coderdemo
+spec:
+  hosts:
+    - "kiali.usgov.coderdemo.io"
+  gateways:
+    - istio-system/public-gateway
+  http:
+    - headers:
+        request:
+          set:
+            x-forwarded-proto: "https"
+      route:
+        - destination:
+            host: kiali.istio-system.svc.cluster.local
+            port:
+              number: 20001
