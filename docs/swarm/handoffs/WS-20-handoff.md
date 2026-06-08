@@ -16,6 +16,70 @@ model presets present; `POST /api/v2/aibridge/anthropic/v1/messages` -> HTTP 200
 real completion; `POST /api/v2/aibridge/openai/v1/chat/completions` -> HTTP 200
 real completion.
 
+## Update 2026-06-08: full direct-model set + "(direct)" display names
+
+Expanded the model presets from the original 4 to the comprehensive direct
+provider set, and prefixed every display name with "(direct)" so the picker
+makes the direct-vs-Bedrock distinction obvious. Source of truth
+`deploy/coder/ai-providers.yaml` was extended; the existing reconciler already
+supports the model `display_name` and `context_limit` fields, so NO new script
+was added (extending the single reconciler avoids two competing tools). The RH
+Summit 2026 model setup script adapted is
+`reference/demo-aigov-rhsummit-2026/scripts/coder-agents-provider-model-config.sh`;
+its `ALL_IDS` Bedrock inference-profile allowlist (Sonnet/Opus/Haiku family)
+was re-expressed as DIRECT Anthropic API ids (no `us.`/`us-gov.` prefix, no
+`-v1:0` suffix) plus the direct OpenAI chat/reasoning ids.
+
+Model ids were NOT guessed: the live direct catalogs were read first via
+`GET /api/v2/aibridge/anthropic/v1/models` and
+`GET /api/v2/aibridge/openai/v1/models`, and every id below was then verified
+invocable (HTTP 200) against the live aibridge routes before being added, so no
+broken preset shipped. None were rejected or flagged.
+
+Final live model set (20 presets, one default):
+
+| Provider | Model id | Display name | Default | Context |
+|----------|----------|--------------|---------|---------|
+| anthropic | claude-opus-4-8 | (direct) Claude Opus 4.8 | no | 200000 |
+| anthropic | claude-opus-4-7 | (direct) Claude Opus 4.7 | no | 200000 |
+| anthropic | claude-opus-4-6 | (direct) Claude Opus 4.6 | no | 200000 |
+| anthropic | claude-opus-4-5-20251101 | (direct) Claude Opus 4.5 | no | 200000 |
+| anthropic | claude-opus-4-1-20250805 | (direct) Claude Opus 4.1 | no | 200000 |
+| anthropic | claude-opus-4-20250514 | (direct) Claude Opus 4 | no | 200000 |
+| anthropic | claude-sonnet-4-6 | (direct) Claude Sonnet 4.6 | no | 200000 |
+| anthropic | claude-sonnet-4-5-20250929 | (direct) Claude Sonnet 4.5 | YES | 200000 |
+| anthropic | claude-sonnet-4-20250514 | (direct) Claude Sonnet 4 | no | 200000 |
+| anthropic | claude-haiku-4-5-20251001 | (direct) Claude Haiku 4.5 | no | 200000 |
+| openai | gpt-5.2 | (direct) GPT-5.2 | no | 400000 |
+| openai | gpt-5.1 | (direct) GPT-5.1 | no | 400000 |
+| openai | gpt-5 | (direct) GPT-5 | no | 400000 |
+| openai | gpt-5-mini | (direct) GPT-5 mini | no | 400000 |
+| openai | gpt-4.1 | (direct) GPT-4.1 | no | 1047576 |
+| openai | gpt-4.1-mini | (direct) GPT-4.1 mini | no | 1047576 |
+| openai | gpt-4o | (direct) GPT-4o | no | 128000 |
+| openai | gpt-4o-mini | (direct) GPT-4o mini | no | 128000 |
+| openai | o3 | (direct) o3 | no | 200000 |
+| openai | o4-mini | (direct) o4-mini | no | 200000 |
+
+Apply result: `--apply` reported 0 failures (16 CREATE + 4 display_name UPDATE
+on the original presets; providers NOOP so the real keys were untouched; the
+Bedrock preset stayed BLOCKED). Verification after apply:
+- `GET /api/experimental/chats/model-configs`: 20 presets, all display names
+  start with "(direct)", exactly one default (`(direct) Claude Sonnet 4.5`).
+- `POST /api/v2/aibridge/anthropic/v1/messages` (claude-sonnet-4-5-20250929):
+  HTTP 200.
+- `POST /api/v2/aibridge/openai/v1/chat/completions` (gpt-4.1): HTTP 200.
+- `kubectl get pods -n coder`: coderd 2/2 Running, 0 restarts (unchanged, 13h).
+- Idempotency: re-run `--dry-run` reports `Summary: BLOCKED=1, NOOP=23` (no
+  CREATE/UPDATE/DISABLE).
+
+Note on "real" ids: this deployment's date is 2026-06-08, and the Anthropic and
+OpenAI direct catalogs it serves include newer generations (for example
+claude-opus-4-8, gpt-5.2). Every id above was taken from the live provider
+catalog listing and confirmed invocable, so none are invented; there are no
+unsure ids to flag.
+
+
 ## Reference commits copied
 | Repo | SHA |
 |------|-----|

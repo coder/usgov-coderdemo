@@ -32,9 +32,9 @@
 # small_fast_model). The model picker is populated from chat_model_configs,
 # managed via /api/experimental/chats/model-configs, each row tied to an
 # enabled provider by ai_provider_id. A model preset can only be created while
-# its provider is enabled (the API returns 412 otherwise). Live enumeration on
-# this deployment showed ZERO model presets, so the picker currently lists
-# providers with an empty model set; the presets below populate it.
+# its provider is enabled (the API returns 412 otherwise). The anthropic and
+# openai direct providers below carry the full validated direct-model set; the
+# Bedrock preset is reconciled only once that provider is enabled.
 #
 # KEYS NEVER LIVE IN THIS FILE
 # Provider keys are referenced by env var name (key_from_env). The reconciler
@@ -56,16 +56,56 @@ providers:
     base_url: "https://api.anthropic.com"
     key_from_env: ANTHROPIC_KEY
     models:
-      # Model generations match the live deployment config
-      # (deployment/config model=claude-sonnet-4-5-20250929,
-      # small_fast_model=claude-haiku-4-5-20251001).
+      # Direct Anthropic API model ids (NOT Bedrock: no us./us-gov. prefix
+      # and no -v1:0 suffix). This is the full Claude family the Anthropic
+      # API advertises on this deployment (GET /api/v2/aibridge/anthropic/
+      # v1/models), adapted from the RH Summit 2026 Bedrock allowlist in
+      # reference/demo-aigov-rhsummit-2026/scripts/
+      # coder-agents-provider-model-config.sh. Each id was verified
+      # invocable (HTTP 200) against the live aibridge anthropic route
+      # before being listed here. Display names are prefixed "(direct)" so
+      # the picker makes the direct-vs-Bedrock distinction obvious. The 4.x
+      # Claude tiers are 200K context. Claude Sonnet 4.5 stays the single
+      # default.
+      - model: "claude-opus-4-8"
+        display_name: "(direct) Claude Opus 4.8"
+        enabled: true
+        context_limit: 200000
+      - model: "claude-opus-4-7"
+        display_name: "(direct) Claude Opus 4.7"
+        enabled: true
+        context_limit: 200000
+      - model: "claude-opus-4-6"
+        display_name: "(direct) Claude Opus 4.6"
+        enabled: true
+        context_limit: 200000
+      - model: "claude-opus-4-5-20251101"
+        display_name: "(direct) Claude Opus 4.5"
+        enabled: true
+        context_limit: 200000
+      - model: "claude-opus-4-1-20250805"
+        display_name: "(direct) Claude Opus 4.1"
+        enabled: true
+        context_limit: 200000
+      - model: "claude-opus-4-20250514"
+        display_name: "(direct) Claude Opus 4"
+        enabled: true
+        context_limit: 200000
+      - model: "claude-sonnet-4-6"
+        display_name: "(direct) Claude Sonnet 4.6"
+        enabled: true
+        context_limit: 200000
       - model: "claude-sonnet-4-5-20250929"
-        display_name: "Claude Sonnet 4.5"
+        display_name: "(direct) Claude Sonnet 4.5"
         enabled: true
         default: true
         context_limit: 200000
+      - model: "claude-sonnet-4-20250514"
+        display_name: "(direct) Claude Sonnet 4"
+        enabled: true
+        context_limit: 200000
       - model: "claude-haiku-4-5-20251001"
-        display_name: "Claude Haiku 4.5"
+        display_name: "(direct) Claude Haiku 4.5"
         enabled: true
         context_limit: 200000
 
@@ -83,14 +123,52 @@ providers:
     base_url: "https://api.openai.com/v1/"
     key_from_env: OPENAI_KEY
     models:
+      # Direct OpenAI API model ids, verified invocable (HTTP 200) against
+      # the live aibridge openai route before being listed. General-purpose
+      # chat/reasoning models only (no embeddings, audio, image, realtime,
+      # search-preview, or transcription ids from the catalog). Display
+      # names are prefixed "(direct)". Context limits: GPT-5 family 400K,
+      # GPT-4.1 family ~1M (1047576), GPT-4o family 128K, o-series 200K.
+      - model: "gpt-5.2"
+        display_name: "(direct) GPT-5.2"
+        enabled: true
+        context_limit: 400000
       - model: "gpt-5.1"
-        display_name: "GPT-5.1"
+        display_name: "(direct) GPT-5.1"
+        enabled: true
+        context_limit: 400000
+      - model: "gpt-5"
+        display_name: "(direct) GPT-5"
+        enabled: true
+        context_limit: 400000
+      - model: "gpt-5-mini"
+        display_name: "(direct) GPT-5 mini"
         enabled: true
         context_limit: 400000
       - model: "gpt-4.1"
-        display_name: "GPT-4.1"
+        display_name: "(direct) GPT-4.1"
         enabled: true
         context_limit: 1047576
+      - model: "gpt-4.1-mini"
+        display_name: "(direct) GPT-4.1 mini"
+        enabled: true
+        context_limit: 1047576
+      - model: "gpt-4o"
+        display_name: "(direct) GPT-4o"
+        enabled: true
+        context_limit: 128000
+      - model: "gpt-4o-mini"
+        display_name: "(direct) GPT-4o mini"
+        enabled: true
+        context_limit: 128000
+      - model: "o3"
+        display_name: "(direct) o3"
+        enabled: true
+        context_limit: 200000
+      - model: "o4-mini"
+        display_name: "(direct) o4-mini"
+        enabled: true
+        context_limit: 200000
 
   # --- Anthropic on Bedrock (PRE-STAGED, DISABLED) -----------------------
   # In-boundary GovCloud path via IRSA (no static key; the AWS SDK default
