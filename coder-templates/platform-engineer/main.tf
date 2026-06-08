@@ -212,7 +212,7 @@ resource "coder_agent" "main" {
     if ! command -v terraform >/dev/null 2>&1; then
       echo "=== Installing terraform (best-effort) ==="
       TFVER="1.9.8"
-      curl -sLo /tmp/tf.zip "https://releases.hashicorp.com/terraform/$TFVER/terraform_${TFVER}_linux_${GOARCH}.zip" && \
+      curl -sLo /tmp/tf.zip "https://releases.hashicorp.com/terraform/$TFVER/terraform_$${TFVER}_linux_$${GOARCH}.zip" && \
         unzip -o /tmp/tf.zip -d ~/.local/bin && rm -f /tmp/tf.zip || true
     fi
 
