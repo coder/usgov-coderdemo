@@ -190,6 +190,27 @@ scopes which remotes the helper authenticates. Source: `main.tf:95-111`,
 `deploy/coder/values.yaml:117-148`. The server-side external-auth config and its
 boundary rationale are in `30-coder-control-plane.md`.
 
+## CI-delivered templates and custom images (GitLab CI)
+
+Beyond this hand-deployed `claude-code` template, the demo also shows templates
+and workspace images being delivered from in-boundary GitLab CI. The GitLab
+project `root/coder-templates` runs two default-branch CI jobs on the
+non-meshed `gitlab-runner` Kubernetes executor:
+
+- `push-template` runs `coder templates push claude-code-ci --org coder` against
+  `https://dev.usgov.coderdemo.io`, publishing a SEPARATE `claude-code-ci`
+  template from `deploy/gitlab-runner/coder-templates-example/template/`.
+- `build-workspace-image` builds a custom workspace image with Kaniko (rootless,
+  unprivileged) and pushes it to the project's GitLab Container Registry at
+  `registry.usgov.coderdemo.io`, air-gapped (Kaniko builds FROM a base
+  pre-seeded from the ECR mirror, using only the CI job token).
+
+A workspace template can then set `var.workspace_image` to that registry image
+(for example
+`registry.usgov.coderdemo.io/root/coder-templates/custom-workspace:latest`) to
+run workspaces on a CI-built image, with the pull staying inside the boundary.
+The CI runner, Container Registry, and air-gap details are in `50-gitlab-scm.md`.
+
 ## Cluster prerequisites (for reference)
 
 The platform layer owns these (not this template directory): the

@@ -24,7 +24,7 @@ GitLab CE runs as a single-container Omnibus image in a one-replica
 | Database | EMBEDDED PostgreSQL bundled in the Omnibus image (the default), data under `/var/opt/gitlab/postgresql` on the `var-opt-gitlab` PVC. NOT the shared RDS instance | `deploy/gitlab/statefulset.yaml`, `deploy/gitlab/README.md` |
 | External URL | `external_url 'https://gitlab.usgov.coderdemo.io'`; bundled NGINX on plain HTTP `:80`, `listen_https=false`, `redirect_http_to_https=false`, forces `X-Forwarded-Proto=https` | `deploy/gitlab/statefulset.yaml` |
 | Storage | 3 gp3 PVCs via `volumeClaimTemplates`: `etc-gitlab` 2Gi, `var-opt-gitlab` 20Gi, `var-log-gitlab` 5Gi (cluster-default `gp3`, encrypted, WaitForFirstConsumer) | `deploy/gitlab/statefulset.yaml` |
-| Trimmed footprint | registry, pages, KAS, and all bundled exporters/prometheus disabled; `puma.worker_processes=2`, `sidekiq.concurrency=10` | `deploy/gitlab/statefulset.yaml` |
+| Trimmed footprint | pages, KAS, and all bundled exporters/prometheus disabled; `puma.worker_processes=2`, `sidekiq.concurrency=10`. The bundled Container Registry is now ENABLED for the CI image-build demo (see "GitLab CI runners and the Container Registry" below) | `deploy/gitlab/statefulset.yaml` |
 | Root bootstrap | `GITLAB_INITIAL_ROOT_PASSWORD` from Secret `gitlab-secrets` (key `initial_root_password`, `optional: true`); consumed on first boot only, then the password lives in the DB | `deploy/gitlab/statefulset.yaml`, `deploy/gitlab/secrets.example.yaml` |
 | First-boot time | First boot runs DB migrations and asset load; the `startupProbe` allows roughly 15 minutes (`initialDelaySeconds: 60`, `periodSeconds: 15`, `failureThreshold: 60`) before liveness takes over. README notes ~15 to 20 min; do not mistake a slow first boot for failure | `deploy/gitlab/statefulset.yaml`, `deploy/gitlab/README.md`, `STATUS.md` |
 
@@ -42,6 +42,12 @@ client --HTTPS--> NLB (TLS terminated, ACM cert) --HTTP--> ingress-nginx --HTTP-
 - Git over SSH (port 22) is not exposed; only HTTPS 443 is fronted by the NLB
   (`deploy/gitlab/README.md`, open questions). Clone/push over HTTPS is the
   supported path.
+
+> Live front door (post-cutover): since the Istio mesh cutover,
+> `gitlab.usgov.coderdemo.io` (and the new `registry.usgov.coderdemo.io`) are
+> served by the shared Istio ingress gateway, not the legacy ingress-nginx shown
+> in the diagram above. The nginx path is retained only as a rollback target.
+> See `25-istio-service-mesh.md`.
 
 Why embedded Postgres rather than RDS (`deploy/gitlab/README.md`): fewest moving
 parts for a single-container demo, no dependency on an orchestrator-created
@@ -197,6 +203,97 @@ user to preserve tenant isolation. Verified live: `austen.platform` SSO login is
 `is_admin=true` (`/admin` returns 200); `pat.platform` and `dana.dev` are regular
 users (`/admin` returns 404).
 
+## GitLab CI runners and the Container Registry
+
+GitLab CI runs in-boundary on the EKS cluster, and the bundled GitLab Container
+Registry is enabled so CI can build and store custom workspace images. Both are
+designed to coexist with the live Istio mesh (STRICT mTLS) and the air-gapped
+image policy. Source: `deploy/gitlab-runner/`, `deploy/gitlab/`
+(`virtualservice-registry.yaml`, registry config in `statefulset.yaml`/
+`service.yaml`), `scripts/setup-gitlab-ci-runners.py`; cross-ref
+`25-istio-service-mesh.md` and `70-workspace-templates.md`.
+
+### Runner (non-meshed namespace)
+
+- The GitLab Runner is deployed via the `gitlab/gitlab-runner` Helm chart
+  (`0.89.1`, appVersion `19.0.1`) into a dedicated namespace `gitlab-runner`
+  kept deliberately OUT of the Istio mesh (`istio-injection: disabled`). This
+  avoids sidecar-lifecycle races with short-lived CI job pods and the
+  STRICT-mTLS refusal of plaintext non-meshed to meshed Service hops. Source:
+  `deploy/gitlab-runner/namespace.yaml`, `values.yaml`, `README.md`.
+- The runner manager (`docker-hub/gitlab/gitlab-runner:v19.0.1`) and helper
+  (`docker-hub/gitlab/gitlab-runner-helper:x86_64-v19.0.1`) are ECR mirrors
+  pinned to the GitLab CE 19.0.1 server. The Kubernetes executor is used; each
+  CI job pins its own ECR image. Source: `deploy/gitlab-runner/values.yaml`,
+  `scripts/images.txt`.
+- The runner registers and polls GitLab over the EXTERNAL URL
+  `https://gitlab.usgov.coderdemo.io`, which resolves to the Istio gateway NLB,
+  so the only secured hop is gateway to meshed `gitlab` workload. The runner
+  authentication token lives in AWS Secrets Manager
+  (`usgov-coderdemo/gitlab/runner`) and is synced into the cluster by ESO
+  (`deploy/gitlab-runner/externalsecret.yaml`); no token is in git.
+
+### Demo project and two CI jobs
+
+`scripts/setup-gitlab-ci-runners.py` (idempotent, `gitlab-rails`) creates the
+project `root/coder-templates`, seeds it from
+`deploy/gitlab-runner/coder-templates-example/`, protects the default branch,
+and sets the masked + protected `CODER_SESSION_TOKEN` CI/CD variable (a rotating
+Coder API token issued at the server `max_token_lifetime`). The project's
+`.gitlab-ci.yml` defines two default-branch jobs:
+
+- `push-template`: runs the ECR `ghcr/coder/coder:v2.34.0` image and executes
+  `coder templates push claude-code-ci --directory ./template --org coder`
+  against `https://dev.usgov.coderdemo.io`. This is a SEPARATE template from the
+  hand-deployed `claude-code` template documented in `70-workspace-templates.md`.
+- `build-workspace-image`: runs Kaniko
+  (`gcr/kaniko-project/executor:v1.24.0-debug`, rootless and unprivileged, no
+  docker-in-docker) to build a custom workspace image and push it to the
+  project's GitLab Container Registry.
+
+### Container Registry (gateway-fronted, air-gapped)
+
+- The bundled registry is enabled in `deploy/gitlab/statefulset.yaml`
+  (`registry['enable'] = true`,
+  `registry_external_url 'https://registry.usgov.coderdemo.io'`). The registry
+  NGINX listens plain HTTP on `:5050` (`listen_https=false`) and trusts the
+  gateway's `X-Forwarded-Proto=https`, mirroring the main GitLab vhost. The
+  `gitlab` Service exposes `:5050` (`http-registry`) alongside `:80`
+  (`deploy/gitlab/service.yaml`).
+- `deploy/gitlab/virtualservice-registry.yaml` routes
+  `registry.usgov.coderdemo.io` through the shared Istio `public-gateway` to the
+  `gitlab` Service `:5050`. The host is already covered by the
+  `*.usgov.coderdemo.io` wildcard DNS record and ACM cert (TLS terminates
+  upstream at the NLB), so no new cert or DNS record was needed.
+- Air-gapped supply chain `docker.io -> ECR -> the project's Container
+  Registry`: the setup script pre-seeds the base with `crane`
+  (`<ecr>/docker-hub/library/debian:bookworm-slim` to
+  `registry.usgov.coderdemo.io/root/coder-templates/workspace-base:bookworm-slim`)
+  using a short-lived, rotated registry-scoped root PAT (never printed). Kaniko
+  then builds FROM that project-local base using only the built-in CI job token,
+  so nothing is pulled from the internet during the build. `mirror-images.sh`
+  gained the `gcr.io -> <ecr>/gcr` mapping for the Kaniko image.
+
+### Live verification (read-only)
+
+```
+# Registry served through the Istio gateway (anonymous /v2/ -> 401 Bearer).
+curl -sS -D - -o /dev/null https://registry.usgov.coderdemo.io/v2/
+  HTTP/2 401
+  server: istio-envoy
+  www-authenticate: Bearer realm="https://gitlab.usgov.coderdemo.io/jwt/auth",service="container_registry"
+
+# A full pipeline on root/coder-templates succeeded (gitlab-rails read):
+#   push-template          -> success (new active claude-code-ci version in Coder)
+#   build-workspace-image  -> success (Kaniko build + push)
+# Project Container Registry repositories/tags:
+#   root/coder-templates/workspace-base   [bookworm-slim]   (pre-seeded)
+#   root/coder-templates/custom-workspace [<sha>, latest]   (built by CI)
+```
+
+The runner pod is `Running` in `gitlab-runner` and shows online in the project's
+CI/CD runner settings.
+
 ## Notes and out of scope
 
 - GitLab to Keycloak SSO (OIDC) is now ENABLED (see "Keycloak SSO" above).
@@ -212,7 +309,11 @@ users (`/admin` returns 404).
 Repo files:
 
 - `deploy/gitlab/statefulset.yaml`, `service.yaml`, `ingress.yaml`,
-  `secrets.example.yaml`, `README.md`
+  `virtualservice-registry.yaml`, `secrets.example.yaml`, `README.md`
+- `deploy/gitlab-runner/` (`values.yaml`, `namespace.yaml`,
+  `externalsecret.yaml`, `coder-templates-example/`, `README.md`)
+- `scripts/setup-gitlab-ci-runners.py`, `scripts/images.txt`,
+  `scripts/mirror-images.sh`
 - `deploy/coder/values.yaml` (external-auth env block)
 - `coder-templates/claude-code/main.tf` (the `coder_external_auth` data source)
 - `STATUS.md`
@@ -220,7 +321,12 @@ Repo files:
 Live read-only commands run (GET only):
 
 - `kubectl -n gitlab get statefulset,svc,ingress`
+- `kubectl -n gitlab get virtualservice`; `kubectl -n gitlab-runner get pods`
 - `curl -sS -o /dev/null -w '%{http_code}' https://gitlab.usgov.coderdemo.io/oauth/authorize`
+- `curl -sS -D - -o /dev/null https://registry.usgov.coderdemo.io/v2/` (registry
+  auth challenge, served by `istio-envoy`)
+- `gitlab-rails runner` (read-only) to read the project's pipelines and
+  Container Registry repositories/tags
 - `POST /api/v2/users/login` then `GET /api/v2/deployment/config` against
   `https://dev.usgov.coderdemo.io` (admin creds from `generated-secrets.env`;
   no secret values reproduced here)
