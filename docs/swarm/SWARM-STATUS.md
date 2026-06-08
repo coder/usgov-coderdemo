@@ -35,7 +35,7 @@
 | 22 | Agent Firewall (Boundary) feasibility | GO (read-only complete) | ws-2x/phase2 | AL2023 kernel 6.18 supports landjail/nsjail in-pod, no AMI change; AI Governance add-on licensed; WS-22b enablement staged default-off |
 | 23 | GitLab -> Coder Agent attribution + PM persona | AUTHORING (SA running) | ws-2x/phase2 | Design + PM persona + webhook authored as STAGED; security-sensitive, needs user review before apply |
 | 24 | Upstream coder/observability dashboards | APPLIED (additive) | ws-2x/phase2 | New aibridge (uid ai-gateway, 33 panels) + boundary (uid agent-firewall, 16 panels) provisioned and verified; old combined ai-governance dashboard retained pending a delete decision |
-| 25 | Workspace template family + e2e acceptance | AUTHORED / STAGED | ws-2x/phase2 | 5 EKS templates authored, terraform fmt clean; root pushes/tests live |
+| 25 | Workspace template family + e2e acceptance | AUTHORED / COMMITTED; push blocked (github 504) | ws-2x/phase2 | 5 templates fmt-clean, constraints match claude-code; live push blocked by external github 504 on coder/coder provider download; ready to push when github egress recovers |
 
 ## Connectivity / live checks done
 | Check | Status | Notes |

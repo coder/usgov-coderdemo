@@ -1,10 +1,46 @@
 # WS-25 handoff
 
-- **Status:** PARTIAL (authoring complete; awaiting root push + build + connectivity)
+- **Status:** AUTHORED + COMMITTED; live push BLOCKED by an external github 504 (provider download), not a template defect. Static validation passed; ready to push when github egress recovers (one command per template).
 - **Agent:** sub-agent WS-25 (workspace template family)
 - **Timestamp:** 2026-06-08T06:28:31Z
 - **Git commit:** none (authoring sub-agent does not run git; root commits ws-2x/phase2)
 - **Branch:** ws-2x/phase2
+
+## Root attempt (2026-06-08): push blocked by external github 504
+
+Root authenticated the coder CLI to https://dev.usgov.coderdemo.io (org via
+`CODER_ORGANIZATION` env or `--org`; the `-O` shorthand is rejected before the
+subcommand) and attempted `coder templates push ai-agent-generic --directory
+coder-templates/ai-agent-generic --yes` to org `coder`. The provisioner import
+got through module download and installed `hashicorp/kubernetes` v3.2.0, then
+failed installing `coder/coder` v2.18.0 with:
+`failed to retrieve cryptographic signature for provider: ... 504 Gateway
+Timeout returned from github.com`. Seven spaced retries over several minutes all
+hit the same 504. A direct `curl https://github.com` from the workspace also
+returns 504, so github (the terraform-provider release host) is unreachable from
+this environment right now. This is the same transient class that the recreation
+push-template job hit earlier today and cleared on retry.
+
+This is NOT a template defect:
+- `terraform fmt -check` passes for all five templates (static, no network).
+- The provider constraints match the proven `claude-code` template exactly
+  (`coder/coder >= 2.13.0`, `hashicorp/kubernetes >= 2.23`); no divergence.
+- The provisioner has no local provider cache or filesystem mirror
+  (`CODER_CACHE_DIRECTORY=/home/coder/.cache/coder` is empty), so every import
+  re-downloads from github; nothing template-side avoids that.
+
+Ready-to-run when github egress recovers (push to org coder, then alpha):
+```sh
+. ~/.config/usgov-coderdemo/env; export PATH="$HOME/.local/bin:$PATH"
+export CODER_URL=https://dev.usgov.coderdemo.io
+export CODER_SESSION_TOKEN=...   # admin token via /api/v2/users/login
+cd /home/coder/demoenv-workspace/usgov-phase2
+for ORG in coder alpha; do for T in cpp-engineer java-engineer platform-engineer data-scientist ai-agent-generic; do
+  CODER_ORGANIZATION="$ORG" coder templates push "$T" --directory "coder-templates/$T" --yes
+done; done
+```
+The interactive build + C4 test still needs a one-time in-boundary GitLab OAuth
+login by the owner, so it remains a manual demo-prep step regardless of github.
 
 ## Reference commits copied
 
@@ -97,7 +133,7 @@ coder login "$CODER_URL"
 - [x] Routing-friendly `description` per template (in metadata.json and WS-25-templates.md)
 - [x] `ai-agent-generic` hardened: `allow_privilege_escalation = false`, no sudo, egress note
 - [x] No emdash/endash/spaced double hyphen (dash-scan clean)
-- [ ] **root:** `terraform fmt`/`validate` or `coder templates push` succeeds for each
+- [~] **root:** `coder templates push` per template: BLOCKED by external github 504 (provider download); terraform fmt-clean, ready to push when github recovers
 - [ ] **root:** test workspace per template reaches Connected (C4) after GitLab login
 - [ ] **root:** at least one app URL per template loads (C3); JupyterLab loads for `data-scientist`
 - [ ] **root:** Coder Agents routes each example issue to the expected template
