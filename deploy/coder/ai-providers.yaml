@@ -46,9 +46,10 @@ version: 1
 
 providers:
   # --- Anthropic direct (PRIMARY, demo default) --------------------------
-  # Egress to api.anthropic.com leaves the VPC via the NAT gateway. The live
-  # key is a placeholder (masked sk-a...ings); apply with ANTHROPIC_KEY set to
-  # the real sk-ant-... value to replace it. Name MUST be "anthropic".
+  # Egress to api.anthropic.com leaves the VPC via the NAT gateway. The real
+  # key is applied from ANTHROPIC_KEY (authoritative in ASM
+  # usgov-coderdemo/coder/ai, also synced to k8s coder/coder-ai by ESO);
+  # re-apply with ANTHROPIC_KEY set to rotate it. Name MUST be "anthropic".
   - type: anthropic
     name: anthropic
     display_name: "Anthropic (direct)"
@@ -170,19 +171,28 @@ providers:
         enabled: true
         context_limit: 200000
 
-  # --- Anthropic on Bedrock (PRE-STAGED, DISABLED) -----------------------
+  # --- Anthropic on Bedrock (GovCloud, IRSA, DISABLED: aibridge signing bug)
   # In-boundary GovCloud path via IRSA (no static key; the AWS SDK default
   # credential chain resolves the web-identity token from the annotated
-  # coder/coder service account). Pre-staged DISABLED: Claude Sonnet 4.5 model
-  # access on GovCloud Bedrock is still gated, and Claude Code's anthropic-beta
-  # header is rejected by GovCloud Bedrock (coder/aibridge#221). A future
-  # Bedrock swap is: flip enabled to true and re-run the reconciler. NAME stays
-  # "anthropic-bedrock"; to route Claude Code at Bedrock instead of direct,
-  # rename it to "anthropic" (and rename the direct provider) at swap time.
+  # coder/coder service account). Access and IAM are READY: Claude Sonnet 4.5
+  # (foundation-model anthropic.claude-sonnet-4-5-20250929 and the us-gov.
+  # cross-region inference profile) is ACTIVE in us-gov-west-1, and the
+  # usgov-coderdemo-coder-bedrock IRSA role allowlists the profile plus the
+  # underlying foundation-model in both gov regions (verified live).
   #
-  # NOTE: the live deployment currently has this provider ENABLED (seeded), so
-  # a dry-run will show "DISABLE anthropic-bedrock". That is the intended
-  # staged posture; set enabled: true here if you want to keep Bedrock live.
+  # BLOCKED by an aibridge SigV4 bug in coder v2.34.0: every Bedrock InvokeModel
+  # returns 403 "signature does not match". The model id contains a colon
+  # (...-v1:0); aibridge under-encodes it in the SigV4 canonical path (single
+  # %3A) while Bedrock requires double-encoding (%253A), so the signature never
+  # matches for ANY model id (confirmed with both the Sonnet profile and
+  # amazon.nova-pro-v1:0). Temp creds incl. x-amz-security-token are present, so
+  # this is signing, not access. Kept DISABLED so the model picker shows no
+  # entry that 403s in the demo. Separately, GovCloud Bedrock also rejects
+  # Claude Code's anthropic-beta header (coder/aibridge#221). To go live once
+  # both are fixed upstream: flip enabled to true and re-run the reconciler;
+  # enabling is restart-safe (the env seed drift guard hashes only {type,
+  # base_url, bedrock_region, keys}, not the enabled flag). NAME stays
+  # "anthropic-bedrock".
   - type: bedrock
     name: anthropic-bedrock
     display_name: "Anthropic on Bedrock (GovCloud, IRSA)"
