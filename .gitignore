@@ -15,3 +15,7 @@ secrets/
 *.key
 *.tfvars.local
 .substrate-outputs.json
+
+# Python bytecode
+__pycache__/
+*.pyc

@@ -1,0 +1,40 @@
+# =============================================================================
+# coder-templates CI: push a Coder template to the GovCloud Coder on every
+# commit to the default branch.
+# =============================================================================
+# Istio-safe + air-gapped by construction:
+#   - Runs on the gitlab-runner Kubernetes executor in the NON-meshed
+#     `gitlab-runner` namespace.
+#   - The job image is the ECR-mirrored Coder image (ships /bin/sh + the coder
+#     CLI). `entrypoint: [""]` neutralizes the image's `coder` entrypoint so the
+#     runner's shell runs this script.
+#   - The coder CLI talks to Coder over the EXTERNAL URL (CODER_URL below), which
+#     enters through the Istio ingress gateway (mTLS to the coder workload). No
+#     plain-text hop to a meshed Service.
+#
+# Auth: the coder CLI reads CODER_URL and CODER_SESSION_TOKEN from the
+# environment. CODER_SESSION_TOKEN is a MASKED + PROTECTED CI/CD variable set on
+# the project by scripts/setup-gitlab-ci-runners.py (never committed to git).
+
+stages:
+  - deploy
+
+variables:
+  CODER_URL: "https://dev.usgov.coderdemo.io"
+  CODER_TEMPLATE_NAME: "claude-code-ci"
+  CODER_ORG: "coder"
+
+push-template:
+  stage: deploy
+  image:
+    name: 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/ghcr/coder/coder:v2.34.0
+    entrypoint: [""]
+  rules:
+    # Push templates only from the default branch (which is protected, so the
+    # masked+protected CODER_SESSION_TOKEN is exposed to the job).
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - coder version
+    - coder whoami
+    - coder templates push "$CODER_TEMPLATE_NAME" --directory ./template --yes --org "$CODER_ORG"
+    - coder templates versions list "$CODER_TEMPLATE_NAME" --org "$CODER_ORG"

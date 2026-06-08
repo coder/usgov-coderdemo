@@ -20,6 +20,15 @@ docker.io/gitlab/gitlab-ce:19.0.1-ce.0
 # --- Workspace base image for the Claude Code template (coder-templates/claude-code) ---
 docker.io/codercom/enterprise-base:ubuntu-noble-20260601
 
+# --- GitLab CI runner (deploy/gitlab-runner) ---
+# Runner + Kubernetes-executor helper, pinned to match the GitLab CE server
+# (19.0.1). The helper tag x86_64-v19.0.1 is the alpine helper the Kubernetes
+# executor uses to clone the repo and manage the build pod. The CI JOB image is
+# the already-mirrored ghcr/coder/coder:v2.34.0 (it ships /bin/sh + the coder
+# CLI), so no separate job image is mirrored here.
+docker.io/gitlab/gitlab-runner:v19.0.1
+docker.io/gitlab/gitlab-runner-helper:x86_64-v19.0.1
+
 # --- External Secrets Operator (deploy/platform/external-secrets) ---
 # Controller, webhook, and cert-controller all use this single image.
 ghcr.io/external-secrets/external-secrets:v2.6.0
