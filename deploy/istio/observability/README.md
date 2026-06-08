@@ -198,6 +198,7 @@ Captured against the live cluster after apply:
   that authorize URL returns the realm `coder` login page (HTTP 200, no
   `invalid redirect_uri` error), confirming the client and redirect URI are
   accepted end-to-end.
-- **Still manual:** a full browser login (entering Keycloak credentials and
-  landing in the Kiali UI) is best confirmed interactively in a browser; the
-  headless checks above prove everything up to the credential prompt.
+- **Browser login confirmed.** A Keycloak realm user completed the full
+  interactive login and landed in the Kiali mesh graph (read-only, per
+  `view_only_mode: true`), so the end-to-end SSO loop, including the credential
+  prompt and callback, is verified, not just the headless redirect checks above.
