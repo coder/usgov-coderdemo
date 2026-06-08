@@ -13,11 +13,18 @@ What it does (idempotent; re-running reconciles in place):
      target org (the owner is template admin everywhere).
 
   2. GitLab (via gitlab-rails inside the gitlab-0 pod, the established admin
-     pattern): create the project root/coder-templates, seed it from
-     deploy/gitlab-runner/coder-templates-example/ (a working Coder template +
-     .gitlab-ci.yml), protect the default branch, set the CODER_SESSION_TOKEN
-     CI/CD variable (masked + protected), and create a PROJECT runner
-     authentication token (glrt-...).
+     pattern):
+       a. DELETE the old project root/coder-templates if present (a clean
+          destroy via Projects::DestroyService; this also removes its registry
+          images and its project runner).
+       b. CREATE coderdemo/coder-templates in the coderdemo group, seed it from
+          deploy/gitlab-runner/coder-templates-example/ (UBI9 image build
+          contexts + a Coder template + .gitlab-ci.yml), protect the default
+          branch, and set the CODER_SESSION_TOKEN CI/CD variable (masked +
+          protected). The seed commit carries [skip ci] so the pipeline is
+          triggered explicitly only after the runner is back online.
+       c. CREATE a GROUP runner authentication token (glrt-...) on the coderdemo
+          group, which serves coderdemo/coder-templates.
 
   3. AWS Secrets Manager: upsert the runner authentication token into
      usgov-coderdemo/gitlab/runner as {"runner-token": "...",
@@ -30,10 +37,9 @@ passed to gitlab-rails over stdin -> env (never argv). The runner token is
 written to a 0600 file inside the pod and retrieved over a captured exec, then
 removed.
 
-Istio note: this script only configures GitLab/Coder/ASM. The runner itself is
-deployed by Helm (deploy/gitlab-runner/values.yaml) into the non-meshed
-gitlab-runner namespace and reaches GitLab/Coder over their external gateway
-URLs, so mesh-wide STRICT mTLS is satisfied.
+After this script: re-sync the ESO ExternalSecret and (re)start the runner so it
+re-registers with the new group token, then trigger a pipeline on the default
+branch. See deploy/gitlab-runner/README.md.
 
 Usage (from the repo root, with the demo kubeconfig + env):
     . ~/.config/usgov-coderdemo/env
@@ -56,23 +62,24 @@ CONTAINER = "gitlab"  # the omnibus container (gitlab-0 also runs an istio sidec
 CODER_URL = "https://dev.usgov.coderdemo.io"
 CODER_TOKEN_NAME = "gitlab-ci"
 
-PROJECT_PATH = "root/coder-templates"
+# Old project to delete (root's personal namespace), and the new project to
+# create in the coderdemo group.
+OLD_PROJECT_PATH = "root/coder-templates"
+GROUP_PATH = "coderdemo"
+PROJECT_PATH = "coderdemo/coder-templates"
 PROJECT_NAME = "coder-templates"
-PROJECT_DESC = "Demo: GitOps for Coder templates (CI pushes to Coder)."
-RUNNER_DESC = "coder-templates k8s runner (usgov-coderdemo demo)"
+PROJECT_DESC = "Demo: GitLab CI builds UBI9 workspace images and pushes a Coder template."
+
+# Actors. austen.platform is Owner of the coderdemo group (and admin), so it can
+# create + seed the group project. root owns the old personal-namespace project.
+GROUP_ACTOR = "austen.platform"
+DELETE_ACTOR = "root"
+
+# Group runner serves every project in the coderdemo group.
+RUNNER_DESC = "coderdemo coder-templates k8s runner (usgov-coderdemo demo)"
 
 REGION = "us-gov-west-1"
 ASM_RUNNER = "usgov-coderdemo/gitlab/runner"
-
-# Container Registry pre-seed: the air-gapped supply chain is
-# docker.io -> ECR -> the project's GitLab Container Registry. The Kaniko CI
-# job then builds FROM the GitLab CR copy using only the CI job token.
-ECR_REGISTRY = "430737322961.dkr.ecr.us-gov-west-1.amazonaws.com"
-ECR_BASE_IMAGE = ECR_REGISTRY + "/docker-hub/library/debian:bookworm-slim"
-REGISTRY_HOST = "registry.usgov.coderdemo.io"
-CR_BASE_IMAGE = REGISTRY_HOST + "/root/coder-templates/workspace-base:bookworm-slim"
-REGISTRY_PAT_NAME = "coder-templates-ci-registry"
-POD_PAT_FILE = "/tmp/gl-registry-pat"
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SEED_DIR = os.path.join(REPO_ROOT, "deploy", "gitlab-runner",
@@ -132,8 +139,8 @@ def coder_login(email, password):
 
 
 def coder_rotate_token(session):
-    """Delete any existing CI token of the same name, then create a fresh one
-    at the server's maximum allowed lifetime. Returns the new token string."""
+    """Delete any existing CI token of the same name, then create a fresh one at
+    the server's maximum allowed lifetime. Returns the new token string."""
     # Look up the server's max token lifetime (nanoseconds).
     status, cfg = coder_request(
         "GET", "/api/v2/users/me/keys/tokens/tokenconfig", token=session)
@@ -199,36 +206,52 @@ def rails(ruby, env_lines=None):
 
 
 # --- Ruby payloads -----------------------------------------------------------
+RUBY_DELETE_OLD_PROJECT = r'''
+actor = User.find_by(username: "%(actor)s") or abort("actor not found")
+project = Project.find_by_full_path("%(old)s")
+if project.nil?
+  puts "delete %(old)s: already absent"
+else
+  id = project.id
+  res = ::Projects::DestroyService.new(project, actor).execute
+  puts "delete %(old)s: #{res ? "destroyed id=#{id}" : "FAILED id=#{id}"}"
+end
+# Verify the path is free for re-use.
+puts "delete %(old)s: still_present=#{!Project.find_by_full_path("%(old)s").nil?}"
+'''
+
 RUBY_ENSURE_PROJECT = r'''
-root = User.find_by(username: "root") or abort("root user not found")
-path  = "%(name)s"
+actor = User.find_by(username: "%(actor)s") or abort("actor not found")
+group = Group.find_by_full_path("%(group)s") or abort("group %(group)s not found")
 full  = "%(full)s"
-# Find or create the project in root's personal namespace.
 project = Project.find_by_full_path(full)
 if project.nil?
   res = ::Projects::CreateService.new(
-    root,
-    name: path, path: path,
-    namespace_id: root.namespace.id,
+    actor,
+    name: "%(name)s", path: "%(name)s",
+    namespace_id: group.id,
+    organization_id: group.organization_id,
     description: "%(desc)s",
     visibility_level: Gitlab::VisibilityLevel::PRIVATE,
     initialize_with_readme: false
   ).execute
   project = res.is_a?(Project) ? res : (res[:project] if res.respond_to?(:[]))
-  abort("project create failed") unless project&.persisted?
-  puts "project #{full}: CREATED id=#{project.id}"
+  abort("project create failed: #{res.respond_to?(:[]) ? res[:message] : res.inspect}") unless project&.persisted?
+  puts "project #{full}: CREATED id=#{project.id} namespace=#{project.namespace.full_path}"
 else
-  puts "project #{full}: exists id=#{project.id}"
+  puts "project #{full}: exists id=#{project.id} namespace=#{project.namespace.full_path}"
 end
 '''
 
-RUBY_SEED_PROTECT_RUNNER = r'''
-root = User.find_by(username: "root") or abort("root user not found")
+RUBY_SEED_PROTECT = r'''
+actor = User.find_by(username: "%(actor)s") or abort("actor not found")
 project = Project.find_by_full_path("%(full)s") or abort("project not found")
 
-# Seed files from the staged directory. Only files that are new or whose
-# content differs become commit actions, so a re-run with identical content is
-# a true no-op (no empty commit, no redundant pipeline).
+# Seed files from the staged directory. Only files that are new or whose content
+# differs become commit actions, so a re-run with identical content is a true
+# no-op (no empty commit). The commit message carries [skip ci] so seeding never
+# triggers a pipeline on its own; the pipeline is triggered explicitly after the
+# runner is back online.
 branch = project.default_branch || "main"
 seed = "%(seed)s"
 actions = []
@@ -250,9 +273,9 @@ if actions.empty?
 else
   start = project.empty_repo? ? nil : branch
   res = ::Files::MultiService.new(
-    project, root,
+    project, actor,
     start_branch: start, branch_name: branch,
-    commit_message: "chore: seed coder-templates demo (Coder Agents)",
+    commit_message: "chore: seed coder-templates demo [skip ci] (Coder Agents)",
     actions: actions
   ).execute
   if res[:status] == :success
@@ -262,14 +285,14 @@ else
   end
 end
 
-# Ensure the project has a default branch set and protect it (so masked +
-# protected CI/CD variables are exposed to default-branch pipelines).
+# Ensure the default branch is set and protected (so masked + protected CI/CD
+# variables are exposed to default-branch pipelines).
 project.reload
 db = project.default_branch || branch
 project.change_head(db) if project.default_branch.nil?
 unless project.protected_branches.exists?(name: db)
   ::ProtectedBranches::CreateService.new(
-    project, root,
+    project, actor,
     name: db,
     push_access_levels_attributes: [{ access_level: Gitlab::Access::MAINTAINER }],
     merge_access_levels_attributes: [{ access_level: Gitlab::Access::MAINTAINER }]
@@ -278,31 +301,6 @@ unless project.protected_branches.exists?(name: db)
 else
   puts "protected branch: #{db} (already)"
 end
-
-# Find or create the PROJECT runner authentication token.
-runner = project.runners.find_by(description: "%(rdesc)s")
-if runner.nil?
-  resp = ::Ci::Runners::CreateRunnerService.new(
-    user: root,
-    params: {
-      runner_type: "project_type", scope: project,
-      description: "%(rdesc)s",
-      tag_list: ["kubernetes", "coder"],
-      run_untagged: true
-    }
-  ).execute
-  abort("runner create failed: #{resp.message}") unless resp.success?
-  runner = resp.payload[:runner]
-  puts "runner: CREATED id=#{runner.id} type=#{runner.runner_type} untagged=#{runner.run_untagged}"
-else
-  puts "runner: exists id=#{runner.id} type=#{runner.runner_type}"
-end
-
-# Write the auth token to a 0600 file for out-of-band retrieval (never printed).
-File.open("%(tokenfile)s", File::WRONLY | File::CREAT | File::TRUNC, 0o600) do |f|
-  f.write(runner.token.to_s)
-end
-puts "runner token: staged (glrt prefix=#{runner.token.to_s.start_with?('glrt-')})"
 '''
 
 RUBY_SET_CI_VARIABLE = r'''
@@ -319,24 +317,35 @@ var.save!
 puts "ci variable #{key}: masked=#{var.masked} protected=#{var.protected}"
 '''
 
-RUBY_REGISTRY_PAT = r'''
-root = User.find_by(username: "root") or abort("root user not found")
-# Rotate a root PAT scoped to the registry so crane can pre-seed the base into
-# the project Container Registry. The raw token is readable only right after
-# creation, so rotate on each run and stage it to a 0600 file for out-of-band
-# retrieval (never printed).
-name = "%(patname)s"
-old = root.personal_access_tokens.find_by(name: name)
-old&.revoke!
-pat = root.personal_access_tokens.create!(
-  name: name,
-  scopes: ["read_registry", "write_registry"],
-  expires_at: 7.days.from_now
-)
-File.open("%(patfile)s", File::WRONLY | File::CREAT | File::TRUNC, 0o600) do |f|
-  f.write(pat.token.to_s)
+RUBY_GROUP_RUNNER = r'''
+actor = User.find_by(username: "%(actor)s") or abort("actor not found")
+group = Group.find_by_full_path("%(group)s") or abort("group %(group)s not found")
+
+# Find or create the GROUP runner authentication token. A group runner serves
+# every project in the group, including %(full)s.
+runner = group.runners.find_by(description: "%(rdesc)s")
+if runner.nil?
+  resp = ::Ci::Runners::CreateRunnerService.new(
+    user: actor,
+    params: {
+      runner_type: "group_type", scope: group,
+      description: "%(rdesc)s",
+      tag_list: ["kubernetes", "coder"],
+      run_untagged: true
+    }
+  ).execute
+  abort("runner create failed: #{resp.message}") unless resp.success?
+  runner = resp.payload[:runner]
+  puts "group runner: CREATED id=#{runner.id} type=#{runner.runner_type} untagged=#{runner.run_untagged}"
+else
+  puts "group runner: exists id=#{runner.id} type=#{runner.runner_type}"
 end
-puts "registry PAT: rotated (scopes read/write_registry, 7d)"
+
+# Write the auth token to a 0600 file for out-of-band retrieval (never printed).
+File.open("%(tokenfile)s", File::WRONLY | File::CREAT | File::TRUNC, 0o600) do |f|
+  f.write(runner.token.to_s)
+end
+puts "runner token: staged (glrt prefix=#{runner.token.to_s.start_with?('glrt-')})"
 '''
 
 
@@ -373,57 +382,6 @@ def asm_put(name, payload):
         os.unlink(path)
 
 
-# --- Container Registry base pre-seed (crane: ECR -> GitLab CR) ---------------
-def registry_pat():
-    """Rotate a registry-scoped root PAT and return it (captured, never echoed)."""
-    r = rails(RUBY_REGISTRY_PAT % {"patname": REGISTRY_PAT_NAME,
-                                   "patfile": POD_PAT_FILE})
-    sys.stdout.write(r.stdout)
-    if r.returncode != 0:
-        sys.stderr.write(r.stderr)
-        return None
-    got = kubectl(["exec", "-i", "-c", CONTAINER, POD, "--",
-                   "sh", "-c", f"cat {POD_PAT_FILE}"])
-    pat = (got.stdout or "").strip()
-    kubectl(["exec", "-c", CONTAINER, POD, "--", "rm", "-f", POD_PAT_FILE])
-    return pat or None
-
-
-def preseed_base(pat):
-    """Copy the base image from the ECR mirror into the project's GitLab
-    Container Registry with crane, so the Kaniko CI job can build FROM it using
-    only the CI job token. Idempotent (crane copy is a no-op if the digest
-    already matches). Non-fatal: a failure is reported but does not block the
-    rest of the setup."""
-    import shutil
-    crane = shutil.which("crane")
-    if not crane:
-        print("WARN: crane not found in PATH; skipping CR base pre-seed")
-        return False
-    pw = subprocess.run(["aws", "ecr", "get-login-password", "--region", REGION],
-                        capture_output=True, text=True)
-    if pw.returncode != 0:
-        print("WARN: aws ecr get-login-password failed; skipping pre-seed")
-        return False
-    if subprocess.run([crane, "auth", "login", ECR_REGISTRY, "-u", "AWS",
-                       "--password-stdin"], input=pw.stdout, text=True,
-                      capture_output=True).returncode != 0:
-        print("WARN: crane ECR login failed; skipping pre-seed")
-        return False
-    if subprocess.run([crane, "auth", "login", REGISTRY_HOST, "-u", "root",
-                       "--password-stdin"], input=pat, text=True,
-                      capture_output=True).returncode != 0:
-        print("WARN: crane GitLab CR login failed; skipping pre-seed")
-        return False
-    cp = subprocess.run([crane, "copy", ECR_BASE_IMAGE, CR_BASE_IMAGE],
-                        capture_output=True, text=True)
-    if cp.returncode != 0:
-        print("WARN: crane copy ECR -> GitLab CR failed:\n" + cp.stderr.strip())
-        return False
-    print(f"CR base: {CR_BASE_IMAGE} (pre-seeded from ECR mirror)")
-    return True
-
-
 # --- Main --------------------------------------------------------------------
 def main():
     secrets = read_secret("CODER_ADMIN_EMAIL", "CODER_ADMIN_PASSWORD")
@@ -447,46 +405,52 @@ def main():
         sys.exit(1)
     print(f"staged example project -> {POD}:{POD_SEED_DIR}")
 
-    # 3. Ensure the project exists (needed before the CR base pre-seed).
-    r = rails(RUBY_ENSURE_PROJECT % {
-        "name": PROJECT_NAME, "full": PROJECT_PATH, "desc": PROJECT_DESC})
+    # 3. Delete the old root/coder-templates project (clean destroy: removes its
+    #    registry images and its project runner). Idempotent.
+    r = rails(RUBY_DELETE_OLD_PROJECT % {
+        "actor": DELETE_ACTOR, "old": OLD_PROJECT_PATH})
     sys.stdout.write(r.stdout)
     if r.returncode != 0:
         sys.stderr.write(r.stderr)
         sys.exit(r.returncode)
 
-    # 4. Pre-seed the Kaniko base image into the project's GitLab Container
-    #    Registry (ECR -> CR) BEFORE the seed commit triggers the pipeline, so
-    #    the build-workspace-image job can build FROM it with only the CI job
-    #    token. Non-fatal if the registry is not reachable yet.
-    pat = registry_pat()
-    if pat:
-        preseed_base(pat)
-    else:
-        print("WARN: could not obtain a registry PAT; skipping CR base pre-seed")
+    # 4. Ensure the new project exists in the coderdemo group.
+    r = rails(RUBY_ENSURE_PROJECT % {
+        "actor": GROUP_ACTOR, "group": GROUP_PATH, "name": PROJECT_NAME,
+        "full": PROJECT_PATH, "desc": PROJECT_DESC})
+    sys.stdout.write(r.stdout)
+    if r.returncode != 0:
+        sys.stderr.write(r.stderr)
+        sys.exit(r.returncode)
 
     # 5. Set the masked + protected CODER_SESSION_TOKEN CI/CD variable BEFORE the
-    #    seed commit. The seed commit (step 6) triggers a pipeline, and that
-    #    pipeline must read the token rotated in step 1. Setting the variable
-    #    after the commit would race the pipeline against a just-deleted token,
-    #    failing `coder whoami` with "session expired".
-    ruby_var = RUBY_SET_CI_VARIABLE % {"full": PROJECT_PATH}
-    r = rails(ruby_var, env_lines=[coder_token])
+    #    pipeline is triggered, so the push-template job reads the token rotated
+    #    in step 1.
+    r = rails(RUBY_SET_CI_VARIABLE % {"full": PROJECT_PATH},
+              env_lines=[coder_token])
     sys.stdout.write(r.stdout)
     if r.returncode != 0:
         sys.stderr.write(r.stderr)
         sys.exit(r.returncode)
 
-    # 6. Seed files (commit -> pipeline) + protect branch + runner token.
-    r = rails(RUBY_SEED_PROTECT_RUNNER % {
-        "full": PROJECT_PATH, "seed": POD_SEED_DIR,
+    # 6. Seed files ([skip ci]) + protect the default branch.
+    r = rails(RUBY_SEED_PROTECT % {
+        "actor": GROUP_ACTOR, "full": PROJECT_PATH, "seed": POD_SEED_DIR})
+    sys.stdout.write(r.stdout)
+    if r.returncode != 0:
+        sys.stderr.write(r.stderr)
+        sys.exit(r.returncode)
+
+    # 7. Create/find the GROUP runner authentication token on coderdemo.
+    r = rails(RUBY_GROUP_RUNNER % {
+        "actor": GROUP_ACTOR, "group": GROUP_PATH, "full": PROJECT_PATH,
         "rdesc": RUNNER_DESC, "tokenfile": POD_TOKEN_FILE})
     sys.stdout.write(r.stdout)
     if r.returncode != 0:
         sys.stderr.write(r.stderr)
         sys.exit(r.returncode)
 
-    # 7. Retrieve the runner token (captured, never echoed) -> ASM.
+    # 8. Retrieve the runner token (captured, never echoed) -> ASM.
     got = kubectl(["exec", "-i", "-c", CONTAINER, POD, "--",
                    "sh", "-c", f"cat {POD_TOKEN_FILE}"])
     runner_token = (got.stdout or "").strip()
@@ -503,12 +467,15 @@ def main():
     # Cleanup staged files.
     kubectl(["exec", "-c", CONTAINER, POD, "--", "rm", "-rf", POD_SEED_DIR])
 
-    print("\nDone. Next:")
-    print("  kubectl apply -f deploy/gitlab-runner/namespace.yaml")
-    print("  kubectl apply -f deploy/gitlab-runner/externalsecret.yaml")
+    print("\nDone. Next (re-register the runner with the new group token):")
+    print("  # Force ESO to re-sync the rotated token, then roll the runner.")
+    print("  kubectl -n gitlab-runner delete secret gitlab-runner-auth --ignore-not-found")
+    print("  kubectl -n gitlab-runner annotate externalsecret gitlab-runner-auth \\")
+    print("    force-sync=$(date +%s) --overwrite")
     print("  helm upgrade --install gitlab-runner gitlab/gitlab-runner \\")
     print("    --version 0.89.1 --namespace gitlab-runner \\")
     print("    -f deploy/gitlab-runner/values.yaml")
+    print("  # Then trigger a pipeline on the default branch (see README).")
 
 
 if __name__ == "__main__":

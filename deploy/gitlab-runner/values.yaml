@@ -20,13 +20,17 @@
 #     workloads, so the secured hop still happens at the gateway.
 #
 # -----------------------------------------------------------------------------
-# Air gap (mandatory)
+# Image sourcing (egress allowed; mirrors for speed/reliability)
 # -----------------------------------------------------------------------------
-# Every image is an ECR mirror (430737322961.dkr.ecr.us-gov-west-1.amazonaws.com);
-# nothing is pulled from the internet at runtime:
+# The gitlab-runner namespace has internet egress, so this is not a strict air
+# gap. The runner manager, executor helper, and default job image are still ECR
+# mirrors (430737322961.dkr.ecr.us-gov-west-1.amazonaws.com) for speed and
+# reliability:
 #   - runner manager : docker-hub/gitlab/gitlab-runner:v19.0.1
 #   - executor helper: docker-hub/gitlab/gitlab-runner-helper:x86_64-v19.0.1
 #   - default job    : ghcr/coder/coder:v2.34.0 (ships /bin/sh + the coder CLI)
+# The build-images CI job runs Kaniko (also an ECR mirror) but pulls the UBI
+# base from registry.access.redhat.com and dnf-installs directly over egress.
 # =============================================================================
 
 gitlabUrl: https://gitlab.usgov.coderdemo.io
@@ -73,6 +77,16 @@ runners:
         helper_cpu_request = "100m"
         helper_memory_request = "128Mi"
         poll_timeout = 600
+        # Allow specific jobs to request more than the modest defaults via
+        # KUBERNETES_*_REQUEST/LIMIT job variables. The build-images job (Kaniko
+        # building the UBI9 images: dnf transactions, Node, clang) needs more
+        # memory than the 1Gi default. Nodes have ~15Gi/3.9 CPU, so a 6Gi/3-CPU
+        # ceiling fits comfortably. Only jobs that set the variables get more;
+        # everything else stays at the defaults above.
+        cpu_request_overwrite_max_allowed = "3"
+        cpu_limit_overwrite_max_allowed = "3"
+        memory_request_overwrite_max_allowed = "6Gi"
+        memory_limit_overwrite_max_allowed = "6Gi"
       [runners.kubernetes.pod_labels]
         "app.kubernetes.io/part-of" = "gitlab-runner"
 
