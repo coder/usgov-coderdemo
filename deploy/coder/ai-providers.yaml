@@ -173,32 +173,30 @@ providers:
         enabled: true
         context_limit: 200000
 
-  # --- Anthropic on Bedrock (GovCloud, IRSA, DISABLED: aibridge signing bug)
-  # In-boundary GovCloud path via IRSA (no static key; the AWS SDK default
+  # --- Anthropic on Bedrock (GovCloud, IRSA): ENABLED + VERIFIED on v2.34.1 ---
+  # In-boundary GovCloud inference via IRSA (no static key; the AWS SDK default
   # credential chain resolves the web-identity token from the annotated
-  # coder/coder service account). Access and IAM are READY: Claude Sonnet 4.5
-  # (foundation-model anthropic.claude-sonnet-4-5-20250929 and the us-gov.
-  # cross-region inference profile) is ACTIVE in us-gov-west-1, and the
-  # usgov-coderdemo-coder-bedrock IRSA role allowlists the profile plus the
-  # underlying foundation-model in both gov regions (verified live).
+  # coder/coder service account). Claude Sonnet 4.5 (the us-gov. cross-region
+  # inference profile plus the underlying foundation-model) is ACTIVE in
+  # us-gov-west-1, and the usgov-coderdemo-coder-bedrock IRSA role allowlists
+  # both in the gov regions.
   #
-  # BLOCKED by an aibridge SigV4 bug in coder v2.34.0: every Bedrock InvokeModel
-  # returns 403 "signature does not match". The model id contains a colon
-  # (...-v1:0); aibridge under-encodes it in the SigV4 canonical path (single
-  # %3A) while Bedrock requires double-encoding (%253A), so the signature never
-  # matches for ANY model id (confirmed with both the Sonnet profile and
-  # amazon.nova-pro-v1:0). Temp creds incl. x-amz-security-token are present, so
-  # this is signing, not access. Kept DISABLED so the model picker shows no
-  # entry that 403s in the demo. Separately, GovCloud Bedrock also rejects
-  # Claude Code's anthropic-beta header (coder/aibridge#221). To go live once
-  # both are fixed upstream: flip enabled to true and re-run the reconciler;
-  # enabling is restart-safe (the env seed drift guard hashes only {type,
-  # base_url, bedrock_region, keys}, not the enabled flag). NAME stays
+  # Previously DISABLED on v2.34.0 by a SigV4 403 ("signature does not match"):
+  # the AI Gateway egress signed requests that still carried inbound proxy
+  # headers (x-forwarded-for, x-envoy-*, x-request-id), so the canonical
+  # SignedHeaders never matched what Bedrock recomputed. Fixed upstream by
+  # coder/coder#26019 (strip proxy headers before signing), shipped in v2.34.1
+  # via backport #26053. Verified live on v2.34.1 (2026-06-08): InvokeModel via
+  # /api/v2/aibridge/anthropic-bedrock/v1/messages returns 200 for the blocking,
+  # streaming (SSE), and anthropic-beta header paths Claude Code uses (the
+  # earlier coder/aibridge#221 beta-header rejection no longer reproduces).
+  # Enabling is restart/seed-safe: the env drift guard hashes only {type,
+  # base_url, bedrock_region, keys}, not the enabled flag. NAME stays
   # "anthropic-bedrock".
   - type: bedrock
     name: anthropic-bedrock
     display_name: "Anthropic on Bedrock (GovCloud, IRSA)"
-    enabled: false
+    enabled: true
     base_url: ""
     auth: irsa            # no static key; do not set key_from_env for bedrock
     bedrock:
@@ -206,8 +204,7 @@ providers:
       model: "us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0"
       small_fast_model: "amazon.nova-pro-v1:0"
     models:
-      # Only reconciled once the provider is enabled (create API requires an
-      # enabled provider). Listed here so the Bedrock swap is a one-line flip.
+      # Reconciled now that the provider is enabled. Picker entry verified live.
       - model: "us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0"
         display_name: "Claude Sonnet 4.5 (Bedrock GovCloud)"
         enabled: true
