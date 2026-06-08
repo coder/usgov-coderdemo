@@ -24,21 +24,47 @@ Keycloak runs as a single-replica `Deployment` in namespace `keycloak`
 | Bootstrap admin | `KC_BOOTSTRAP_ADMIN_USERNAME`/`KC_BOOTSTRAP_ADMIN_PASSWORD` from Secret `keycloak-admin` (first boot only) | `deploy/keycloak/deployment.yaml` |
 | Health/metrics | `KC_HEALTH_ENABLED`/`KC_METRICS_ENABLED=true` on management port `9000`; startup/liveness/readiness probes hit `/health/started`, `/health/live`, `/health/ready` | `deploy/keycloak/deployment.yaml` |
 
-Network path (`deploy/keycloak/ingress.yaml`, `service.yaml`):
+Network path. The live edge is the Istio ingress gateway (the nginx `Ingress`
+below is the still-running rollback path):
 
 ```
-client --HTTPS--> NLB (TLS terminated, ACM cert) --HTTP--> ingress-nginx --HTTP--> Service keycloak:8080 --> pod :8080
+client --HTTPS--> gateway NLB (TLS terminated, ACM cert) --HTTP--> istio-ingressgateway --HTTP (x-forwarded-proto: https)--> Service keycloak:8080 --> pod :8080
 ```
 
+- The host `auth.usgov.coderdemo.io` is routed by the `keycloak`
+  `VirtualService` (ns `keycloak`) bound to `istio-system/public-gateway`, which
+  forces `x-forwarded-proto: https` to the backend. See
+  [25-istio-service-mesh.md](25-istio-service-mesh.md) and "Account Console
+  cookie fix" below.
 - `Service` is `ClusterIP` exposing only HTTP `8080`; the management port `9000`
   is intentionally not exposed through the Service (`deploy/keycloak/service.yaml`).
-- `Ingress` is `ingressClassName: nginx`, host `auth.usgov.coderdemo.io`, with
-  `ssl-redirect: "false"` (backend is plain HTTP, avoids a redirect loop) and a
-  larger `proxy-buffer-size` for Keycloak's auth cookies
+- A nginx `Ingress` (`ingressClassName: nginx`, host `auth.usgov.coderdemo.io`,
+  `ssl-redirect: "false"`, larger `proxy-buffer-size` for Keycloak's auth
+  cookies) still exists as the rollback path but is out of the public DNS path
   (`deploy/keycloak/ingress.yaml`).
 - The realm JSON is mounted from a ConfigMap (`keycloak-realm-coder`) generated
   from `realm-coder.json` by `deploy/keycloak/kustomization.yaml` (with
   `disableNameSuffixHash: true`).
+
+### Account Console cookie fix (Istio gateway)
+
+The `keycloak` pod runs with `KC_PROXY_HEADERS=xforwarded`, so it trusts the
+`X-Forwarded-Proto` header to decide the request scheme. Under the previous L4
+nginx edge, TLS terminated at the NLB and plain HTTP was forwarded, so Keycloak
+saw `X-Forwarded-Proto: http` and issued its session cookies (`AUTH_SESSION_ID`,
+`KC_RESTART`, `KC_AUTH_SESSION_HASH`) without `Secure` or `SameSite=None`. The
+Account Console's silent-SSO iframe requires `SameSite=None; Secure` cookies, so
+the browser dropped them and the Console broke.
+
+The Istio `keycloak` VirtualService now deterministically presents
+`x-forwarded-proto: https` (header `set`, so a client-forged value is
+overwritten). Combined with `KC_PROXY_HEADERS=xforwarded`, Keycloak treats the
+request as secure and sets `Secure; SameSite=None` on its session cookies.
+`KC_HOSTNAME=https://auth.usgov.coderdemo.io` independently pins the issuer and
+redirect URLs; both settings are required. Verified live: a `curl -D -` against
+the realm authorization endpoint through the gateway returns `AUTH_SESSION_ID`,
+`KC_AUTH_SESSION_HASH`, and `KC_RESTART`, each carrying `Secure` and
+`SameSite=None`, and the Account Console loads.
 
 Secrets are provisioned out of band (not committed). `secrets.example.yaml`
 documents the expected keys for `keycloak-db` and `keycloak-admin`
@@ -152,6 +178,31 @@ sign_in_text   = Sign in with Keycloak
 
 This matches `deploy/coder/values.yaml` exactly.
 
+## Kiali SSO (OIDC client `kiali`)
+
+Kiali, the Istio mesh console, is fronted by the same realm (`coder`). A
+confidential OIDC client `kiali` is provisioned by `scripts/setup-kiali-oidc.py`
+(idempotent, mirroring `setup-grafana-oidc.py` / `setup-gitlab-oidc.py`):
+authorization-code flow with PKCE (S256), the shared full-path `groups`
+membership mapper, and redirect URIs `https://kiali.usgov.coderdemo.io/kiali/*`
+plus the bare `https://kiali.usgov.coderdemo.io/kiali`. The script publishes the
+client secret to AWS Secrets Manager at
+`usgov-coderdemo/observability/kiali-oauth` (`{"oidc-secret"}`); ESO syncs it
+into the Kubernetes Secret `kiali` (ns `istio-system`, key `oidc-secret`) that
+Kiali reads for OpenID login, so no secret is in git.
+
+Kiali consumes the client with `auth.strategy: openid`, issuer
+`https://auth.usgov.coderdemo.io/realms/coder`, scopes `openid profile email`,
+and `username_claim: preferred_username`. Anonymous access is disabled, so
+unauthenticated users are redirected to Keycloak. Because this EKS API server
+does not trust Keycloak as an OIDC issuer, per-user Kubernetes RBAC is
+unavailable, so Kiali runs `disable_rbac: true` paired with `view_only_mode:
+true`: any authenticated realm user may view the mesh, nobody can change it from
+Kiali. See [25-istio-service-mesh.md](25-istio-service-mesh.md) for the gateway
+routing and [55-observability.md](55-observability.md) for the Grafana side. The
+realm also carries `grafana` and `gitlab` OIDC clients, documented in
+[55-observability.md](55-observability.md) and [50-gitlab-scm.md](50-gitlab-scm.md).
+
 ## Configured vs NOT configured
 
 ### Configured and working
@@ -199,12 +250,19 @@ Repo files:
 - `deploy/keycloak/deployment.yaml`, `service.yaml`, `ingress.yaml`,
   `kustomization.yaml`, `realm-coder.json`, `secrets.example.yaml`, `README.md`
 - `deploy/coder/values.yaml` (OIDC env block)
+- `deploy/istio/gateway/virtualservice-keycloak.yaml` (the scheme/cookie fix)
+- `deploy/istio/observability/kiali-server-values.yaml`,
+  `externalsecret-kiali-oauth.yaml`, `README.md`, and `scripts/setup-kiali-oidc.py`
+  (the `kiali` OIDC client)
 - `STATUS.md`
 
 Live read-only commands run (GET only):
 
 - `kubectl -n keycloak get deploy,svc,ingress`
 - `curl -sS https://auth.usgov.coderdemo.io/realms/coder/.well-known/openid-configuration`
+- `curl -sS -D -` against the realm authorization endpoint through the gateway,
+  confirming `AUTH_SESSION_ID` / `KC_AUTH_SESSION_HASH` / `KC_RESTART` carry
+  `Secure; SameSite=None`
 - `POST /api/v2/users/login` then `GET /api/v2/deployment/config` against
   `https://dev.usgov.coderdemo.io` (admin creds from `generated-secrets.env`;
   no secret values reproduced here)

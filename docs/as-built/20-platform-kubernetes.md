@@ -16,7 +16,8 @@ Live `kubectl get ns` plus `kubectl get pods -A -o wide`:
 | `coder-workspaces` | Workspace pods (e.g. `coder-8e0c3f4a-...`, 1/1 Running) |
 | `gitlab` | `gitlab-0` (StatefulSet, embedded Postgres/Redis) |
 | `keycloak` | `keycloak` (Deployment, 1 replica) |
-| `ingress-nginx` | `ingress-nginx-controller` (2 replicas) |
+| `ingress-nginx` | `ingress-nginx-controller` (2 replicas), out of the DNS path, kept for rollback (issue #34) |
+| `istio-system` | Istio mesh: `istiod`, `istio-ingressgateway` (2, the live edge NLB), `kiali`. See [25-istio-service-mesh.md](25-istio-service-mesh.md) |
 | `kube-system` | `aws-load-balancer-controller` (2), `aws-node`/vpc-cni, `coredns` (2), `kube-proxy`, `ebs-csi-controller` (2) + `ebs-csi-node` (DaemonSet) |
 
 The `coder` and `coder-workspaces` namespaces are split on purpose: the control
@@ -24,7 +25,21 @@ plane runs in `coder`, while it provisions workspace pods into
 `coder-workspaces` (see workspace RBAC below and
 `coder-templates/claude-code/main.tf`).
 
-## Ingress: NLB, aws-load-balancer-controller, ingress-nginx
+## Ingress: the Istio gateway is the live L7 edge
+
+> **Live edge: Istio.** The L7 edge is now the Istio ingress gateway behind its
+> own internet-facing NLB, not ingress-nginx. One `Gateway` plus per-host
+> `VirtualService` objects route every public host (`dev`/workspace apps,
+> `auth`, `gitlab`, `grafana`, `kiali`), TLS still terminates at the NLB with
+> the same ACM wildcard cert, and the gateway normalizes `x-forwarded-proto:
+> https` to every backend. All Route53 records point at the gateway NLB.
+> ingress-nginx still runs but is out of the DNS path, kept only for rollback;
+> its decommission is tracked in issue #34. See
+> [25-istio-service-mesh.md](25-istio-service-mesh.md) for the gateway, NLB/TLS
+> design, per-host routing, and the mTLS model. The nginx detail below documents
+> the still-running rollback path.
+
+## Ingress (rollback path): NLB, aws-load-balancer-controller, ingress-nginx
 
 Two controllers cooperate:
 
@@ -65,10 +80,11 @@ ingresses) and `alb` (`ingress.k8s.aws/alb`, shipped by the LB controller, not
 used by any app). All three app ingresses (`coder`, `gitlab`, `keycloak`)
 resolve to the same NLB address (live `kubectl get ingress -A`).
 
-Hairpin: the Route53 names resolve to the public NLB, and in-cluster requests to
-those public hostnames route back through the NLB with valid TLS. This lets
-Coder's server-side OIDC calls to Keycloak and workspace agent connections work
-without split-horizon DNS (`deploy/platform/README.md`, `STATUS.md`).
+Hairpin: the Route53 names resolve to the public gateway NLB, and in-cluster
+requests to those public hostnames route back through the NLB with valid TLS.
+This lets Coder's server-side OIDC calls to Keycloak and workspace agent
+connections work without split-horizon DNS (`deploy/platform/README.md`,
+`STATUS.md`).
 
 ## Storage
 

@@ -15,6 +15,7 @@ an unauthenticated `GET /`.
 | Coder | `https://dev.usgov.coderdemo.io` | `200` (`/api/v2/buildinfo` -> `v2.34.0+3006da5`) | Owner password login or "Sign in with Keycloak". |
 | Keycloak | `https://auth.usgov.coderdemo.io` | `302` (redirect to login) | Realm `coder`; admin console at `/admin`, master realm, user `admin`. |
 | GitLab | `https://gitlab.usgov.coderdemo.io` | `302` (redirect to login) | Root login; embedded Postgres. |
+| Kiali | `https://kiali.usgov.coderdemo.io/kiali` | Keycloak SSO | Istio mesh dashboard; OpenID login via realm `coder`, anonymous access disabled. |
 
 Re-check any endpoint without printing secrets:
 
@@ -174,8 +175,54 @@ kubectl -n <ns> get events --sort-by=.lastTimestamp | tail -30
 ```
 
 Expected namespaces: `coder`, `coder-workspaces`, `gitlab`, `ingress-nginx`,
-`keycloak`. Coder and Keycloak run 1 replica each; GitLab is the `gitlab-0`
-StatefulSet; ingress-nginx runs 2 controller replicas (facts sheet, `STATUS.md`).
+`istio-system`, `keycloak`. Coder and Keycloak run 1 replica each; GitLab is the
+`gitlab-0` StatefulSet; the Istio ingress gateway runs 2 replicas in
+`istio-system` alongside `istiod` and `kiali`; ingress-nginx still runs 2
+controller replicas but is out of the DNS path (facts sheet, `STATUS.md`).
+
+## Istio service mesh (day-2 + rollback)
+
+The live L7 edge is the Istio ingress gateway, not ingress-nginx. Full detail is
+in [`25-istio-service-mesh.md`](25-istio-service-mesh.md).
+
+Where things live:
+
+- Gateway + control plane: ns `istio-system`. The ingress gateway sits behind its
+  own internet-facing NLB (the ACM cert is attached there); `istiod` is the
+  control plane. Show the gateway NLB hostname (the `EXTERNAL-IP`):
+
+  ```sh
+  export KUBECONFIG=./kubeconfig
+  kubectl -n istio-system get svc istio-ingressgateway -o wide
+  ```
+
+- Meshed namespaces: `coder`, `keycloak`, `gitlab` (sidecar-injected);
+  `coder-workspaces` is intentionally NOT injected. Confirm with
+  `kubectl get ns -L istio-injection`.
+
+Reaching Kiali: browse `https://kiali.usgov.coderdemo.io/kiali` and sign in with
+Keycloak SSO (OpenID, realm `coder`; anonymous access is disabled).
+
+Checking mTLS:
+
+- In Kiali, use the Security view (the lock badges on the graph) to confirm the
+  service-to-service edges are mutual TLS.
+- From Prometheus or Grafana, mutual-TLS request volume is
+  `istio_requests_total{connection_security_policy="mutual_tls"}`.
+
+Rolling back the mesh:
+
+- Drop mesh-wide STRICT back to PERMISSIVE (keeps the sidecars, allows plaintext
+  again) by re-applying the same-named `PeerAuthentication`:
+
+  ```sh
+  kubectl apply -f deploy/istio/security/peerauthentication-permissive.yaml
+  ```
+
+- Per-host edge rollback to nginx: repoint that host's Route53 ALIAS from the
+  Istio gateway NLB back to the ingress-nginx NLB
+  `k8s-ingressn-ingressn-e16fe3cd33-...`. nginx is still running for exactly this
+  reason; its decommission is tracked in issue #34.
 
 ## Known gaps / remaining actions
 
@@ -203,11 +250,16 @@ StatefulSet; ingress-nginx runs 2 controller replicas (facts sheet, `STATUS.md`)
    aws-load-balancer-controller via Helm; RDS roles/dbs created via SQL; ECR
    image mirroring; Route53 records; k8s Secrets; Keycloak realm import; the
    Coder Helm release plus runtime appearance banner and DB-seeded AI providers;
-   the GitLab OAuth app minted via API; and the Coder template push. See
-   `STATUS.md` "Deviations to reconcile into Terraform".
+   the GitLab OAuth app minted via API; and the Coder template push. The Istio
+   service mesh (gateway + STRICT mTLS + namespace injection + Route53 cutover +
+   Kiali) was likewise applied imperatively this session. See `STATUS.md`
+   "Deviations to reconcile into Terraform" and
+   [`80-iac-vs-imperative.md`](80-iac-vs-imperative.md).
 
-Out of scope for the demo: OpenShift, Istio, observability, full identity sync
-(`STATUS.md`).
+Out of scope for the demo: OpenShift (`STATUS.md`). Istio is now the live edge
+([`25-istio-service-mesh.md`](25-istio-service-mesh.md)); observability
+([`55-observability.md`](55-observability.md)) and identity sync
+([`45-idp-sync-personas.md`](45-idp-sync-personas.md)) have also been built.
 
 ## Related documents
 

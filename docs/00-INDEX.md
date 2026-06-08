@@ -18,6 +18,7 @@ live result.
 
 - [as-built/README.md](as-built/README.md) (index)
 - [as-built/00-overview.md](as-built/00-overview.md): architecture + flows
+- [as-built/25-istio-service-mesh.md](as-built/25-istio-service-mesh.md): Istio service mesh edge + mesh-wide mTLS
 - [as-built/55-observability.md](as-built/55-observability.md): in-cluster Prometheus + Grafana observability
 - [as-built/80-iac-vs-imperative.md](as-built/80-iac-vs-imperative.md): declarative vs imperative ledger
 - [as-built/85-secrets-management.md](as-built/85-secrets-management.md): secrets via ESO + AWS Secrets Manager
@@ -77,8 +78,8 @@ applied to the live environment.
 
 ## Runtime artifacts (created by agents)
 
-- [swarm/handoffs/](swarm/handoffs/) — per-WS outputs
-- [swarm/SWARM-STATUS.md](swarm/SWARM-STATUS.md) — orchestrator dashboard
+- [swarm/handoffs/](swarm/handoffs/): per-WS outputs
+- [swarm/SWARM-STATUS.md](swarm/SWARM-STATUS.md): orchestrator dashboard
 
 ## Templates
 

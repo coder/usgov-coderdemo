@@ -7,9 +7,12 @@ Coder control plane's Prometheus metrics and rendering Coder's prebuilt Grafana
 dashboards with live data at `https://grafana.usgov.coderdemo.io`. Alongside it,
 hand-rolled manifests add an in-cluster Grafana Loki and a Promtail DaemonSet
 that collects pod logs from every node, queried in Grafana through a `loki`
-datasource. Grafana signs in through the same Keycloak realm (`coder`) as the
-rest of the stack, so the demo is one SSO. Coder audit logging is entitled and
-on; structured JSON server logs make it SIEM-ready and are shipped to Loki.
+datasource. Istio mesh telemetry (istiod control-plane and proxy metrics) feeds
+the same Prometheus and renders in the five standard Istio Grafana dashboards,
+with a Kiali console for the live service graph; see "Istio mesh observability".
+Grafana signs in through the same Keycloak realm (`coder`) as the rest of the
+stack, so the demo is one SSO. Coder audit logging is entitled and on; structured
+JSON server logs make it SIEM-ready and are shipped to Loki.
 
 This is the reliable in-cluster implementation. The AWS-native managed variant
 (Amazon Managed Prometheus / Grafana, Security Lake) is planned separately and
@@ -177,7 +180,11 @@ logging in to the public Grafana with that password succeeds.
 
 Hand-rolled manifests in `deploy/observability/` add an in-cluster log store and
 collector next to the metrics stack. They are plain Kubernetes objects (not part
-of the `kps` Helm release) and use ECR-mirrored images.
+of the `kps` Helm release) and use ECR-mirrored images. All pod logs across every
+namespace are aggregated in-boundary into a single-binary Loki, so log search
+works entirely inside the cluster; nothing leaves the boundary. This is the
+in-cluster logging solution for the demo (the AWS-native managed variant is
+intentionally not built here).
 
 | Component | Live object | Storage |
 |---|---|---|
@@ -263,38 +270,92 @@ Builds returns `1` for `status="succeeded"`. The header comment in
 
 ## AI Governance dashboard
 
-`deploy/observability/dashboards-ai-governance.yaml` adds one merged dashboard
-(ConfigMap `coder-dashboard-ai-governance`, ns `monitoring`, label
-`grafana_dashboard: "1"`, uid `ai-governance`, title "AI Governance") for the
-Coder AI Governance add-on. It replaces the two separate add-on dashboards with a
-single view that covers both halves of the feature, and it lives in its own file
-so it never conflicts with `dashboards-coder.yaml`. Every panel targets datasource
-uid `prometheus` or uid `loki`.
+`deploy/observability/dashboards-ai-governance.yaml` ships the AI Governance
+dashboard as ConfigMap `coder-dashboard-ai-governance` (ns `monitoring`, label
+`grafana_dashboard: "1"`, uid `ai-governance`, title "AI Governance"), imported by
+the Grafana sidecar. This session it was rebuilt (usgov-dashboard PR #32) from the
+earlier two-row view into 42 panel entries across four collapsible rows: AI
+Gateway Overview, Usage & Cost, Intercepts & Sessions, and Agent Firewall.
+Verified live: the ConfigMap holds 42 panels (four row headers plus 38 data
+panels) and its panels reference exactly three datasource uids, `prometheus`,
+`loki`, and `aibridge-postgres`.
 
-The "AI Gateway (AI Bridge)" row reads the `coder_aibridged_*` Prometheus series:
-a Configured Providers stat (`count(coder_aibridged_provider_info)`, value `2`),
-a Provider Reload Status stat
-(`coder_aibridged_providers_last_reload_timestamp_seconds == bool` the success
-variant, value `1` = Healthy), a Last Successful Reload stat
-(`coder_aibridged_providers_last_reload_success_timestamp_seconds`), and a
-Provider Inventory table (provider name, type, status). A logs panel streams
-`{namespace="coder"} |~ "aibridged"` from Loki, with a companion log event rate
-timeseries (`count_over_time` over 5m).
+The redesign adds a third datasource to Grafana, a read-only Postgres datasource
+(name "AI Gateway DB", uid `aibridge-postgres`) provisioned by the same datasource
+sidecar as the `loki` datasource (`datasource-aibridge-postgres.yaml`, a
+`grafana_datasource: "1"` ConfigMap). It exists because token, cost, interception,
+and session detail live only in the Coder database, not in Prometheus or Loki. It
+authenticates as a least-privilege Postgres role `grafana_ro`; the password is
+held only in the Kubernetes Secret `aigov-grafana-db` (synced from AWS Secrets
+Manager via ESO), so no secret is in git. Verified live: the
+`aibridge-postgres-datasource` ConfigMap is present in ns `monitoring`.
 
-The "Agent Firewall (Boundary)" row reads
-`agent_boundary_log_proxy_batches_forwarded_total`: a total forwarded batches
-stat, a per workspace forwarded rate timeseries
-(`sum by (workspace_name, username) (rate(...[5m]))`), and an Active Boundary
-Agents table (workspace, user, template, agent). A logs panel streams
-`{namespace="coder-workspaces"} |= "boundary"` from Loki.
+The dashboard renames "AI Bridge"/"aibridge" to "AI Gateway" and "Boundary" to
+"Agent Firewall" in display text only; the underlying Prometheus series, LogQL
+literals, API paths, and database table names are unchanged. Because the live
+Anthropic key is a placeholder, no real AI traffic is metered, so the token,
+cost, prompt, and session panels read `0` or stay empty by design while provider
+health, interception, and the log streams have data. See `60-ai-gateway.md` for
+the full panel inventory, the cost derivation, and the `grafana_ro` credential
+handling.
 
-AI Bridge exposes no token, request, or latency Prometheus metrics, and the live
-Anthropic key is a placeholder, so AI and agent traffic is minimal. Usage panels
-(Total Boundary Batches, the per workspace rate, and the log streams) therefore
-read `0` or stay sparse; that is expected and documented in each panel
-description. Verified live through Grafana `POST /api/ds/query`: all ten query
-panels return HTTP 200 with real series or a clean `0`, and Grafana
-`GET /api/dashboards/uid/ai-governance` returns the imported dashboard.
+## Istio mesh observability
+
+The Istio service mesh (`deploy/istio/`) is wired into this same
+kube-prometheus-stack so the demo can visualize mesh traffic and mTLS without a
+separate stack. The manifests live in `deploy/istio/observability/`
+(usgov-istio PR #31) and were applied to the live cluster; they add to the
+metrics and Grafana stack above without modifying it. Every image is ECR-mirrored.
+
+### Mesh metrics scraping
+
+Two monitors in ns `istio-system` are selected by the kps Prometheus operator
+(`serviceMonitorSelectorNilUsesHelmValues: false`, empty selector), so they are
+discovered cluster-wide like `coder-metrics.yaml`:
+
+| Monitor | Live object | Scrapes |
+|---|---|---|
+| ServiceMonitor | `istio-component-monitor` | istiod control-plane metrics on the `istiod` Service port `http-monitoring` (`:15014`), scraped once. |
+| PodMonitor | `envoy-stats-monitor` | each Istio proxy's merged telemetry at `:15020/stats/prometheus` (the ingress gateway today; app sidecars automatically once their namespaces are injected). |
+
+The PodMonitor is annotation-driven (`prometheus.io/scrape`, `.../path`,
+`.../port` on each proxy pod), so newly injected sidecars are picked up with no
+manifest change. These feed istiod series (`pilot_xds`, proxy convergence, push
+counts) and request series (`istio_requests_total`) into Prometheus.
+
+### Istio Grafana dashboards
+
+The five standard Istio dashboards ship as Grafana ConfigMaps in ns `monitoring`
+(`dashboards-istio.yaml`, label `grafana_dashboard: "1"`, sourced from the Istio
+`release-1.30` tree) and are imported by the same Grafana sidecar as the Coder
+dashboards. Verified live as ConfigMaps `istio-dashboard-mesh`,
+`istio-dashboard-service`, `istio-dashboard-workload`,
+`istio-dashboard-control-plane`, and `istio-dashboard-performance`. The Control
+Plane dashboard renders istiod data immediately; the Service and Workload
+dashboards expose `mTLS` legend series for sidecar-to-sidecar traffic.
+
+### Kiali mesh console (Keycloak SSO)
+
+Kiali v2.26.0 (the line Istio 1.30 certifies) runs as a server-only Deployment in
+ns `istio-system` from the ECR-mirrored `quay/kiali/kiali:v2.26.0` image, exposed
+at `https://kiali.usgov.coderdemo.io/kiali` through the Istio public gateway
+(`virtualservice-kiali.yaml`). It signs in through the same Keycloak realm
+(`coder`) as Grafana and Coder using OpenID (`auth.strategy: openid`, client
+`kiali`); anonymous access is disabled. Because this EKS API server is not
+integrated with Keycloak as an OIDC issuer, per-user Kubernetes RBAC is not
+available, so Kiali runs with `auth.openid.disable_rbac: true` paired with
+`deployment.view_only_mode: true`: any authenticated realm user may view the
+mesh, nobody can change it from Kiali. The OIDC client secret is synced from AWS
+Secrets Manager into the `kiali` Secret via ESO (no secret in git). Verified live:
+the `kiali` pod is `Running` and `https://kiali.usgov.coderdemo.io/kiali/`
+returns HTTP `200` over valid TLS.
+
+What this buys the demo: Kiali draws a padlock on edges carrying
+sidecar-to-sidecar mTLS, and the Istio Service/Workload dashboards show mTLS
+percentage series. These appear once application namespaces are sidecar-injected
+and generate traffic; with no injected namespaces yet, the mesh graph and the
+mTLS panels are sparse by design (this is mesh traffic, unrelated to the
+placeholder-Anthropic AI traffic note elsewhere).
 
 ## Ingress (HTTPS)
 
@@ -346,4 +407,7 @@ forever).
 - kube-state-metrics is disabled, so the dashboards' pod resource limit/request
   and restart/terminated-reason panels (which depend on `kube_pod_*`) stay
   empty; container CPU/memory usage panels (cAdvisor via the kubelet) render.
+- Istio mesh dashboards and the Kiali mTLS padlocks are sparse until application
+  namespaces are sidecar-injected and generate traffic; istiod control-plane
+  data renders immediately. See "Istio mesh observability".
 - Alerting is out of scope: Alertmanager and the bundled alert rules are off.

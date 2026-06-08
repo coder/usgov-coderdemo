@@ -14,6 +14,7 @@ docs explain the *how* and *why* behind that status.
 | [00-overview.md](00-overview.md) | Executive + architecture overview, component map, topology diagram, and the three core flows (SSO login, workspace create + GitLab auth, Claude Code through the AI Gateway). Start here. |
 | [10-infrastructure.md](10-infrastructure.md) | AWS GovCloud substrate: account/region/partition, VPC, EKS (standard, not Auto Mode, and why), node group, IRSA roles, RDS, ECR, Route53, ACM, NLB. |
 | [20-platform-kubernetes.md](20-platform-kubernetes.md) | Kubernetes platform layer: namespaces, ingress-nginx + load-balancer-controller, `gp3` StorageClass, workspace RBAC, platform-owned Secrets. |
+| [25-istio-service-mesh.md](25-istio-service-mesh.md) | Istio service mesh: the ingress gateway L7 edge (own NLB + ACM cert), mesh-wide STRICT mTLS, sidecar injection scope (`coder`, `keycloak`, `gitlab`; `coder-workspaces` excluded), the RDS ServiceEntry, and Kiali. ingress-nginx is retained out of the DNS path for rollback (issue #34). |
 | [30-coder-control-plane.md](30-coder-control-plane.md) | Coder v2.34.0 control plane: a section-by-section walkthrough of `deploy/coder/values.yaml`, OIDC SSO, auth-boundary hardening, licensing, appearance. |
 | [40-identity-keycloak.md](40-identity-keycloak.md) | Keycloak realm `coder`, the OIDC client, the SSO wiring, and IdP sync status. |
 | [45-idp-sync-personas.md](45-idp-sync-personas.md) | Multi-tenant org/group/role hierarchy, the persona users, and the verified Keycloak-to-Coder IdP sync (org + group + role). |
