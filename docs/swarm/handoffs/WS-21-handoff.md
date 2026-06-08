@@ -1,6 +1,35 @@
 # WS-21 handoff
 
-- **Status:** PARTIAL (authored + locally verified; root must apply, then commit)
+- **Status:** APPLIED + VERIFIED (root applied 2026-06-08; gate and content confirmed live)
+
+## Applied result (root, 2026-06-08)
+Ran `python3 scripts/setup-envdocs.py` (full install). Created Keycloak client
+`envdocs` + groups mapper (HTTP 201), created ASM `usgov-coderdemo/envdocs/oauth`
+(client-secret + generated cookie-secret), mirrored nginx/mkdocs-material/
+oauth2-proxy into ECR, applied deploy/envdocs/ (namespace, envdocs-site
+ConfigMap, ExternalSecret, envdocs Deployment, oauth2-proxy Deployment, both
+Ingresses), and upserted the Route53 alias
+`envdocs.usgov.coderdemo.io -> ingress-nginx NLB` (more specific than the Istio
+wildcard). ESO synced `envdocs/envdocs-oauth` within the wait window. Both pods
+are 1/1 Running and rolled out.
+
+Verified live:
+- `GET https://envdocs.usgov.coderdemo.io/` -> 302 `/oauth2/start` (gated).
+- `/oauth2/start` -> 302 to `auth.usgov.coderdemo.io/realms/coder/.../auth` with
+  `client_id=envdocs` and the correct `redirect_uri` (OIDC wiring correct).
+- Behind the gate (internal probe of the envdocs Service) the built MkDocs site
+  serves HTTP 200, title `usgov-coderdemo Environment Docs`; diagram pages embed
+  Mermaid (`/architecture/` 3 refs, `/access-and-auth/` 2 refs).
+
+Note (non-blocking hardening): oauth2-proxy v7.7.1 does not send a PKCE
+`code_challenge` by default, so the S256 flow on the confidential `envdocs`
+client is not exercised. The client uses a client secret, so this is optional;
+to enable PKCE add `--code-challenge-method=S256` to the oauth2-proxy args.
+
+Rollback: `kubectl delete namespace envdocs`; delete the Keycloak `envdocs`
+client; delete the Route53 A record `envdocs.usgov.coderdemo.io`; optionally
+delete ASM `usgov-coderdemo/envdocs/oauth` and the three mirrored ECR tags.
+
 - **Agent:** WS-21 (envdocs site, Keycloak-gated)
 - **Timestamp:** 2026-06-08
 - **Git commit:** (root applies + commits; none made by this agent)

@@ -31,7 +31,7 @@
 | WS | Title | Status | Branch | Notes |
 |----|-------|--------|--------|-------|
 | 20 | AI providers declarative reconciler | APPLIED / PASS | ws-2x/phase2 | Real anthropic+openai keys live via API; 4 model presets; aibridge anthropic+openai routes return HTTP 200; coderd 2/2 no restart; re-run is no-op |
-| 21 | envdocs.usgov.coderdemo.io (KC-gated) | AUTHORED / STAGED | ws-2x/phase2 | MkDocs+oauth2-proxy+OIDC client authored, mkdocs build --strict clean; apply staged (scripts/setup-envdocs.py) |
+| 21 | envdocs.usgov.coderdemo.io (KC-gated) | APPLIED + VERIFIED | ws-2x/phase2 | Live: 302 gate to Keycloak (client_id=envdocs), built MkDocs site serves 200 behind the gate with Mermaid; routed via ingress-nginx NLB + more-specific Route53 record |
 | 22 | Agent Firewall (Boundary) feasibility | GO (read-only complete) | ws-2x/phase2 | AL2023 kernel 6.18 supports landjail/nsjail in-pod, no AMI change; AI Governance add-on licensed; WS-22b enablement staged default-off |
 | 23 | GitLab -> Coder Agent attribution + PM persona | AUTHORING (SA running) | ws-2x/phase2 | Design + PM persona + webhook authored as STAGED; security-sensitive, needs user review before apply |
 | 24 | Upstream coder/observability dashboards | APPLIED (additive) | ws-2x/phase2 | New aibridge (uid ai-gateway, 33 panels) + boundary (uid agent-firewall, 16 panels) provisioned and verified; old combined ai-governance dashboard retained pending a delete decision |
@@ -49,9 +49,11 @@
   API with real keys (never touched the seeded CODER_AI_GATEWAY_PROVIDER_* Helm
   env). Verified: 4 model presets, aibridge anthropic + openai routes HTTP 200,
   coderd stayed 2/2 with 0 restarts, re-run is a no-op.
-- WS-21 apply: new public subdomain envdocs.usgov.coderdemo.io + new Keycloak
-  OIDC client + oauth2-proxy + Route53 record. Additive (does not touch existing
-  hosts), lower risk, but creates a new auth surface.
+- WS-21 apply: DONE. New public subdomain envdocs.usgov.coderdemo.io live and
+  gated by oauth2-proxy against Keycloak realm coder. Additive (own namespace,
+  new OIDC client, new Route53 record); did not touch existing hosts. Verified
+  302 gate plus 200 site behind the gate. Routes via ingress-nginx (issue #34
+  decommission would require moving envdocs to Istio first).
 - WS-24 apply: delete custom dashboard, apply upstream aibridge+boundary
   dashboards. Reversible via git; verify panels 200 after.
 - WS-23 apply: webhook -> Coder Agents API as the assigned developer; new PM
