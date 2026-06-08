@@ -72,6 +72,16 @@ uid `loki`, which the in-cluster Loki + Promtail stack (below) backs through
 `loki-datasource.yaml`, so they resolve and query live log data instead of
 erroring.
 
+The AI Governance add-on has its own dashboard,
+`dashboards-ai-governance.yaml` (uid `ai-governance`), covering the AI Gateway
+(AI Bridge) and Agent Firewall (Boundary): provider health and forwarded-batch
+counters from Prometheus, log streams from Loki, and usage, cost, intercept, and
+session drill-downs from the Coder database through a dedicated read-only
+Postgres datasource (`datasource-aibridge-postgres.yaml`, uid
+`aibridge-postgres`). See
+[`AI_GOVERNANCE_DASHBOARD.md`](AI_GOVERNANCE_DASHBOARD.md) for the panel
+inventory, cost derivation, and the read-only role and credential handling.
+
 The `coder-status` dashboard's "Observability Tools" row originally came from the
 upstream coder/observability LGTM reference and checked components this demo does
 not run (distributed Loki read/write/backend/canary, Grafana Agent, config

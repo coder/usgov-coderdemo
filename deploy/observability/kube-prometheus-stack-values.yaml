@@ -126,14 +126,23 @@ grafana:
     existingSecret: grafana-admin
     userKey: admin-user
     passwordKey: admin-password
-  # Keycloak OIDC client secret (ESO-synced from
-  # usgov-coderdemo/observability/grafana-oauth) injected as the env var that
-  # overrides [auth.generic_oauth] client_secret, so no secret sits in git.
+  # Secrets injected as env vars so nothing sensitive sits in git:
+  #   - GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET: Keycloak OIDC client secret
+  #     (ESO-synced from usgov-coderdemo/observability/grafana-oauth) that
+  #     overrides [auth.generic_oauth] client_secret.
+  #   - AIGOV_DB_PASSWORD: password for the read-only Coder DB role grafana_ro,
+  #     from the Kubernetes Secret `aigov-grafana-db`. Grafana expands it as
+  #     ${AIGOV_DB_PASSWORD} in datasource-aibridge-postgres.yaml, which powers
+  #     the AI Governance dashboard's usage, cost, and session drill-downs.
   envValueFrom:
     GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET:
       secretKeyRef:
         name: grafana-oauth
         key: client-secret
+    AIGOV_DB_PASSWORD:
+      secretKeyRef:
+        name: aigov-grafana-db
+        key: AIGOV_DB_PASSWORD
   # The bundled Kubernetes dashboards need kube-state-metrics, which is off.
   defaultDashboardsEnabled: false
   service:
