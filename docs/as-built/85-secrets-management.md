@@ -22,7 +22,7 @@ External Secrets Operator (ns external-secrets)
   ClusterSecretStore "aws-secretsmanager"  ->  ExternalSecret (per app secret)
         |  writes/owns
         v
-Kubernetes Secret (coder/keycloak/gitlab ns)  ->  consumed by app pods (secretKeyRef)
+Kubernetes Secret (coder, keycloak, gitlab, gitlab-runner, monitoring, istio-system ns)  ->  consumed by app pods (secretKeyRef)
 ```
 
 ## What runs where
@@ -32,7 +32,7 @@ Kubernetes Secret (coder/keycloak/gitlab ns)  ->  consumed by app pods (secretKe
 | ESO | Helm chart `external-secrets` 2.6.0, ns `external-secrets` (controller + webhook + cert-controller, all 1/1). Image from the ECR mirror `ghcr/external-secrets/external-secrets:v2.6.0`. Values: `deploy/platform/external-secrets/values.yaml`. |
 | IRSA role | `usgov-coderdemo-external-secrets`. Trust: `system:serviceaccount:external-secrets:external-secrets`. Policy: `secretsmanager:GetSecretValue` + `DescribeSecret` on `arn:aws-us-gov:secretsmanager:us-gov-west-1:430737322961:secret:usgov-coderdemo/*` only. Codified in `terraform/secrets-hardening.tf`. |
 | Store | `ClusterSecretStore/aws-secretsmanager` (AWS SecretsManager, region us-gov-west-1, `auth.jwt.serviceAccountRef` -> the ESO controller SA). Status `Valid`. |
-| ExternalSecrets | One per app secret (`deploy/platform/external-secrets/secretstore-and-externalsecrets.yaml`), `dataFrom.extract`, `creationPolicy: Owner`, `refreshInterval: 1h`. |
+| ExternalSecrets | 14 total: 12 in `deploy/platform/external-secrets/secretstore-and-externalsecrets.yaml`, plus `deploy/istio/observability/externalsecret-kiali-oauth.yaml` (Istio mesh) and `deploy/gitlab-runner/externalsecret.yaml` (GitLab CI runners). Each `dataFrom.extract`, `creationPolicy: Owner`, `refreshInterval: 1h`. |
 
 ## ASM secret layout
 
@@ -49,7 +49,20 @@ keys. ESO `extract` materializes them 1:1.
 | usgov-coderdemo/coder/provisioner-bravo | key | coder/coder-provisioner-bravo |
 | usgov-coderdemo/keycloak/admin | username, password | keycloak/keycloak-admin |
 | usgov-coderdemo/keycloak/db | username, password | keycloak/keycloak-db |
-| usgov-coderdemo/gitlab/secrets | initial_root_password | gitlab/gitlab-secrets |
+| usgov-coderdemo/gitlab/secrets | initial_root_password, root_password | gitlab/gitlab-secrets |
+| usgov-coderdemo/gitlab/oidc | client-secret | gitlab/gitlab-oidc |
+| usgov-coderdemo/gitlab/runner | runner-token, runner-registration-token | gitlab-runner/gitlab-runner-auth |
+| usgov-coderdemo/observability/grafana | admin-user, admin-password | monitoring/grafana-admin |
+| usgov-coderdemo/observability/grafana-oauth | client-secret | monitoring/grafana-oauth |
+| usgov-coderdemo/observability/kiali-oauth | oidc-secret | istio-system/kiali |
+
+Twelve of these ExternalSecrets live in
+`deploy/platform/external-secrets/secretstore-and-externalsecrets.yaml`. The
+Kiali OAuth secret ships with the Istio mesh
+(`deploy/istio/observability/externalsecret-kiali-oauth.yaml`, target Secret
+`kiali` key `oidc-secret`) and the GitLab Runner auth token ships with the CI
+runners (`deploy/gitlab-runner/externalsecret.yaml`). All reference the one
+`aws-secretsmanager` ClusterSecretStore.
 
 `usgov-coderdemo/rds/master` (the RDS master credential) predates this and is
 managed by Terraform; the apps do not read it.
@@ -63,12 +76,19 @@ existing Secrets in place.
 
 ## Verification (performed)
 
-- ClusterSecretStore: `Ready=True reason=Valid` (IRSA to ASM works).
-- All 9 ExternalSecrets: `SecretSynced=True`.
-- ESO adopted the pre-existing Secrets with byte-identical data (sha256 of the
-  data map matched before and after for all 9), so running pods were not
-  disrupted. ESO now owns them (`reconcile.external-secrets.io/managed=true`,
-  ownerReference to the ExternalSecret).
+- ClusterSecretStore `aws-secretsmanager`: `Ready=True reason=Valid` (IRSA to
+  ASM works). It is the only store object; no namespaced `SecretStore` exists
+  (`kubectl get secretstore,clustersecretstore -A`).
+- All 14 ExternalSecrets: `SecretSynced=True` (`kubectl get externalsecret -A`),
+  spanning namespaces `coder`, `keycloak`, `gitlab`, `gitlab-runner`,
+  `monitoring`, and `istio-system`.
+- For the 9 control-plane Secrets that pre-dated ESO, the operator adopted them
+  in place with byte-identical data (sha256 of the data map matched before and
+  after for all 9), so running pods were not disrupted. ESO now owns them
+  (`reconcile.external-secrets.io/managed=true`, ownerReference to the
+  ExternalSecret). The five added later (`gitlab-oidc`, `gitlab-runner-auth`,
+  `grafana-admin`, `grafana-oauth`, and the Kiali `kiali-oauth`) were created
+  directly as ESO-owned, not adopted.
 - Recovery proven: deleting `coder/coder-ai` caused ESO to rebuild it from ASM
   within seconds with the identical value.
 

@@ -15,6 +15,14 @@ it was not re-executed here (read-only, GET-only); the 502 proof below is cited
 from `STATUS.md` and the facts sheet, and the live providers/config it depends
 on were independently re-verified.
 
+Re-verified live this session (read-only): `GET /api/v2/buildinfo` reports
+`v2.34.0+3006da5`; the AI Governance dashboard ConfigMap
+`coder-dashboard-ai-governance` (ns `monitoring`) holds 42 panel entries (four
+row headers plus 38 data panels) and references datasource uids `prometheus`,
+`loki`, and `aibridge-postgres`; the `aibridge-postgres-datasource` ConfigMap is
+present in ns `monitoring`; and the seeded provider env vars in
+`deploy/coder/values.yaml` are unchanged at the cited line ranges.
+
 ## Enabled by default in v2.34
 
 AI Gateway is enabled by default in v2.34 and is set explicitly in Helm
@@ -200,6 +208,85 @@ A `200` requires a working upstream credential:
   the GovCloud console, then route Claude Code at the `anthropic-bedrock`
   provider (rename it to `anthropic` or set the workspace model). Bedrock access
   is still gated; Nova Pro is the proven fallback. Source: `STATUS.md:76-79`.
+
+## AI Governance dashboard
+
+The AI Gateway is surfaced in Grafana by the AI Governance dashboard (uid
+`ai-governance`, ConfigMap `coder-dashboard-ai-governance` in ns `monitoring`).
+This session it was redesigned (usgov-dashboard PR #32) from the earlier two-row
+view into 42 panel entries across four collapsible rows: AI Gateway Overview,
+Usage & Cost, Intercepts & Sessions, and Agent Firewall (four row headers plus 38
+data panels). Source: `deploy/observability/dashboards-ai-governance.yaml` and
+`deploy/observability/AI_GOVERNANCE_DASHBOARD.md`. The broader Grafana stack is in
+`55-observability.md`.
+
+### Data sources
+
+| Source | uid | Powers |
+|---|---|---|
+| Prometheus | `prometheus` | Provider health and reload status (`coder_aibridged_*`); Agent Firewall forwarded-batch counters (`agent_boundary_log_proxy_batches_forwarded_total`). |
+| Loki | `loki` | AI Gateway log stream (ns `coder`) and Agent Firewall log stream (ns `coder-workspaces`), plus their event-rate panels. |
+| AI Gateway DB (Postgres) | `aibridge-postgres` | Token, cost, interception, session, prompt, and tool drill-downs from the Coder database that Prometheus does not expose. |
+
+The Postgres datasource is new in this redesign. The deployed Coder (v2.34.0)
+exposes only provider-health gauges for the AI Gateway to Prometheus, and the
+latest `coder/coder` adds no token, request, or cost metrics either, so the
+per-interception, per-session, token, and cost data lives only in the Coder
+database (`aibridge_interceptions`, `aibridge_token_usages`,
+`aibridge_user_prompts`, `aibridge_tool_usages`, `boundary_sessions`,
+`ai_model_prices`). Prometheus and Loki are used wherever they suffice; Postgres
+backs only the drill-downs that have no metric or log equivalent.
+
+### Cost derivation
+
+Cost is derived from `aibridge_token_usages` joined to `ai_model_prices`. The
+price table stores per-million-token prices in micro-units (1 dollar = 1,000,000
+units) with separate input, output, cache-read, and cache-write columns, so the
+cost panels compute dollars as:
+
+```
+cost_usd = (input_tokens*input_price + output_tokens*output_price
+            + cache_read_input_tokens*cache_read_price
+            + cache_write_input_tokens*cache_write_price) / 1e12
+```
+
+The live `ai_model_prices` table is populated (71 rows, including the
+`claude-sonnet-4-5` family used in the demo), so cost is fully derivable once
+token usage is recorded.
+
+### Read-only Postgres datasource (credential handling)
+
+The datasource (`deploy/observability/datasource-aibridge-postgres.yaml`, name
+"AI Gateway DB", uid `aibridge-postgres`) authenticates as `grafana_ro`, a
+least-privilege Postgres role: `LOGIN`, no superuser, no `CREATEROLE`, with
+`SELECT` on only the AI Gateway and Agent Firewall tables plus `users` and
+`workspace_agents` for joins (`deploy/observability/sql/aibridge-grafana-ro.sql`).
+Because the Coder application role lacks `CREATEROLE`, the role is created as the
+RDS master user. The password lives only in the Kubernetes Secret
+`aigov-grafana-db` (key `AIGOV_DB_PASSWORD`), synced from AWS Secrets Manager via
+ESO; Grafana injects it through `grafana.envValueFrom` and expands
+`${AIGOV_DB_PASSWORD}` in the datasource ConfigMap. No password is in git. The
+datasource is `editable: false`, `isDefault: false`, and connects with
+`sslmode: require`.
+
+### Display-only rename
+
+The dashboards rename terminology in display text only: "AI Bridge"/"aibridge" ->
+"AI Gateway", and "Boundary" -> "Agent Firewall". The underlying Prometheus series
+names (`coder_aibridged_*`, `agent_boundary_*`), the LogQL literals matched in the
+log streams (`aibridged`, `boundary`), the API paths (`/api/v2/aibridge/...`), and
+the database table names (`aibridge_*`, `boundary_*`) are unchanged.
+
+### Sparse-data caveat
+
+The demo Anthropic key is a placeholder (see above), so AI calls fail before any
+tokens are metered and no real AI traffic is recorded. The token and cost stats,
+Tokens Over Time, Estimated Cost Over Time, Token Usage Detail, Recent User
+Prompts, Recent Tool Calls, and the Firewall Sessions panels therefore read `0`
+or stay empty by design; this is expected, not an error. Panels that already have
+data include provider health and inventory, total interceptions, active sessions,
+unique users, interceptions by provider / model / user, Recent Interceptions,
+Sessions, and the Agent Firewall log stream.
 
 ## Known issues
 

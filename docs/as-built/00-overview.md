@@ -43,8 +43,11 @@ the only model egress is the governed AI Gateway path.
 > and full identity sync for later phases. As built, GitLab runs **in-cluster**
 > on EKS as a single-container StatefulSet with embedded Postgres, RDS is a
 > **Multi-AZ PostgreSQL 18.4** instance (one shared instance backing both the
-> `coder` and `keycloak` databases, on version 18.4 rather than 17), and Istio
-> / OCP / observability / identity sync are **out of scope** (`STATUS.md`). The identity doc
+> `coder` and `keycloak` databases, on version 18.4 rather than 17), and
+> OpenShift (OCP) remains **out of scope**. Istio, observability, and identity
+> sync, originally deferred, have since been built; Istio is now the live L7
+> edge with mesh-wide STRICT mTLS (`STATUS.md`; see
+> [`25-istio-service-mesh.md`](25-istio-service-mesh.md)). The identity doc
 > (`docs/architecture/identity.md`) names realm `usgov`; the realm that was
 > actually imported and is in use is **`coder`** (`STATUS.md`,
 > `deploy/CONVENTIONS.md`, `deploy/keycloak/README.md`).
@@ -53,12 +56,14 @@ the only model egress is the governed AI Gateway path.
 
 | Layer | Component | Where | Notes |
 |---|---|---|---|
-| Edge | Internet-facing NLB + ACM cert `*.usgov.coderdemo.io` | AWS | TLS terminates at the NLB; backends are plain HTTP (`deploy/CONVENTIONS.md`). |
-| Edge | Route53 zone `Z06701704WFETYIRU5C8` | AWS | Alias A records `dev` / `auth` / `gitlab` / `*` -> NLB (`deploy/platform/README.md`). |
-| Ingress | ingress-nginx (Helm chart `4.15.1`) + aws-load-balancer-controller | ns `ingress-nginx` | 2 controller replicas; `className: nginx`. |
+| Edge | Istio ingress gateway NLB + ACM cert `*.usgov.coderdemo.io` | ns `istio-system` | Live L7 edge. TLS terminates at the gateway NLB; the gateway forwards to meshed Services over mTLS (`25-istio-service-mesh.md`). |
+| Edge | Route53 zone `Z06701704WFETYIRU5C8` | AWS | Alias A records `dev` / `auth` / `gitlab` / `grafana` / `kiali` / `*` -> the Istio gateway NLB (`25-istio-service-mesh.md`). |
+| Mesh | Istio `1.30.1`, mesh-wide STRICT mTLS | ns `istio-system` | Sidecars injected in `coder`, `keycloak`, `gitlab`; `coder-workspaces` excluded (`25-istio-service-mesh.md`). |
+| Ingress (retained) | ingress-nginx (Helm chart `4.15.1`) + aws-load-balancer-controller | ns `ingress-nginx` | Out of the DNS path; kept running for per-host rollback. Decommission tracked in issue #34. |
 | Control plane | Coder `v2.34.0` (1 replica) | ns `coder` | OIDC SSO, AI Gateway, GitLab external auth, path apps disabled (`deploy/coder/values.yaml`). |
 | Identity | Keycloak `26.6.3`, realm `coder` | ns `keycloak` | OIDC client `coder`; admin console `/admin` (`deploy/keycloak/`). |
 | SCM | GitLab CE `19.0.1-ce.0`, embedded Postgres | ns `gitlab` | Single-container Omnibus StatefulSet `gitlab-0` (`deploy/gitlab/`). |
+| CI / Registry | GitLab CI runner + GitLab Container Registry | ns `gitlab-runner`, ns `gitlab` | Non-meshed runner reaches GitLab/Coder over external URLs; registry served at `registry.usgov.coderdemo.io` via the Istio gateway to `gitlab.gitlab.svc:5050` (`deploy/gitlab-runner/`, `deploy/gitlab/virtualservice-registry.yaml`). |
 | Workspaces | Claude Code template pods | ns `coder-workspaces` | `enterprise-base` image, gp3 PVC, Claude Code + AgentAPI + code-server (`coder-templates/claude-code/main.tf`). |
 | Data | RDS PostgreSQL `18.4`, single instance | AWS | Databases `coder` and `keycloak`; `rds.force_ssl=1` (`deploy/CONVENTIONS.md`, `STATUS.md`). |
 | Registry | ECR `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com` | AWS | Mirrored images, no pull-through in GovCloud (`scripts/mirror-images.sh`). |
@@ -66,9 +71,13 @@ the only model egress is the governed AI Gateway path.
 
 EKS detail: cluster `usgov-coderdemo`, k8s `1.36`, standard EKS (Auto Mode was
 abandoned in this account), managed node group `mng` of 3x `m5.xlarge`
-(`AL2023_x86_64_STANDARD`, static capacity). Provisioners are **internal only**:
-3 built-in provisioner daemons run in the coderd pod, with no external daemons
-(`STATUS.md`, facts sheet). See `20`/`10` companion docs below.
+(`AL2023_x86_64_STANDARD`, static capacity). Provisioners: the coderd pod runs
+the built-in provisioner daemons for the default organization, and two external
+per-tenant provisioner daemons (`coder-provisioner-alpha`,
+`coder-provisioner-bravo`, ns `coder`, org-scoped keys) serve the `alpha` and
+`bravo` orgs (`deploy/coder/provisioners.yaml`, `STATUS.md`). Verified live
+2026-06-08: both external provisioner Deployments are `1/1` and meshed (SYNCED).
+See `20`/`10` companion docs below.
 
 ## Topology
 
@@ -78,10 +87,10 @@ flowchart TB
 
   subgraph gov [AWS GovCloud us-gov-west-1 / account 430737322961]
     r53[Route53 zone usgov.coderdemo.io]
-    nlb[Internet-facing NLB<br/>ACM TLS *.usgov.coderdemo.io]
+    nlb[Istio gateway NLB<br/>ACM TLS *.usgov.coderdemo.io]
 
     subgraph eks [EKS cluster usgov-coderdemo / k8s 1.36]
-      nginx[ingress-nginx controller]
+      igw[Istio ingress gateway<br/>ns istio-system]
       coder[Coder control plane<br/>ns coder / v2.34.0]
       kc[Keycloak<br/>ns keycloak / realm coder]
       gl[GitLab CE<br/>ns gitlab / embedded Postgres]
@@ -95,10 +104,10 @@ flowchart TB
 
   anthropic([api.anthropic.com])
 
-  user --> r53 --> nlb --> nginx
-  nginx --> coder
-  nginx --> kc
-  nginx --> gl
+  user --> r53 --> nlb --> igw
+  igw -->|mTLS| coder
+  igw -->|mTLS| kc
+  igw -->|mTLS| gl
   coder --> rds
   kc --> rds
   coder -->|IRSA role usgov-coderdemo-coder-bedrock| bedrock
@@ -114,10 +123,10 @@ ASCII summary for terminals:
                |
         Route53 (usgov.coderdemo.io)
                |
-   NLB (ACM TLS *.usgov.coderdemo.io)
+   Istio gateway NLB (ACM TLS *.usgov.coderdemo.io)
                |
-         ingress-nginx
-        /      |      \
+       Istio ingress gateway (ns istio-system)
+        /      |      \   (mTLS to meshed Services)
      Coder  Keycloak  GitLab        (all on EKS; GitLab embeds its own Postgres)
        |        |
        +--------+--> RDS PostgreSQL 18.4 (coder, keycloak dbs)
@@ -161,10 +170,11 @@ ASCII summary for terminals:
    (`coder-templates/claude-code/main.tf`). Coder uses the GitLab endpoints
    `…/oauth/authorize`, `…/oauth/token`, and `…/oauth/token/info`
    (`deploy/coder/values.yaml`).
-3. An in-process provisioner (one of the 3 built-in daemons in coderd) applies
-   the template Terraform: it creates a gp3 PVC and a pod in
-   `coder-workspaces`. The `coder-workspace-perms` Role/RoleBinding lets the
-   `coder` service account manage pods and PVCs in that namespace
+3. A provisioner daemon applies the template Terraform (the default org uses a
+   built-in daemon in coderd; the `alpha` and `bravo` orgs use their dedicated
+   external provisioner, `deploy/coder/provisioners.yaml`): it creates a gp3 PVC
+   and a pod in `coder-workspaces`. The `coder-workspace-perms` Role/RoleBinding
+   lets the `coder` service account manage pods and PVCs in that namespace
    (`deploy/platform/workspace-rbac.yaml`).
 4. The pod boots the ECR-mirrored `enterprise-base` image and the agent connects
    using `CODER_AGENT_TOKEN` / `CODER_AGENT_URL`. The `claude-code` module
@@ -211,6 +221,7 @@ confirm exact names against the directory listing if a link does not resolve.
 |---|---|
 | `10-*.md` | Infrastructure substrate (Terraform): VPC, RDS, ECR, IRSA OIDC provider + Bedrock role, EKS cluster. |
 | `20-*.md` | EKS platform: standard node group `mng`, addons, gp3 storage, ingress / NLB / DNS, workspace RBAC. |
+| [`25-istio-service-mesh.md`](25-istio-service-mesh.md) | Istio service mesh: the ingress gateway L7 edge (own NLB + ACM cert), mesh-wide STRICT mTLS, sidecar injection scope, the RDS ServiceEntry, and Kiali. |
 | [`30-coder-control-plane.md`](30-coder-control-plane.md) | Coder Helm values, server env, hardening, licensing. |
 | [`40-identity-keycloak.md`](40-identity-keycloak.md) | Keycloak realm `coder`, OIDC client, SSO config, identity gaps. |
 | [`50-gitlab-scm.md`](50-gitlab-scm.md) | In-boundary GitLab and the Coder git external-auth provider. |
