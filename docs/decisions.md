@@ -39,5 +39,13 @@ its `docs/swarm/handoffs/WS-NN-handoff.md`; the orchestrator consolidates here.
 - WS-20: see docs/swarm/handoffs/WS-20-handoff.md
 - WS-21: see docs/swarm/handoffs/WS-21-handoff.md
 - WS-22: see docs/swarm/handoffs/WS-22-handoff.md
+- WS-23: see docs/swarm/handoffs/WS-23-handoff.md. Decision: attribute Coder
+  AI-agent work to the assigned GitLab developer via the stable 2.34 Tasks API
+  service-account on-behalf-of model (`POST /api/v2/tasks/{user}` sets the
+  workspace owner to the path-param user; verified in reference/coder
+  coderd/aitasks.go and coderd/workspaces.go). Trigger is a GitLab Issue webhook
+  gated by a `coder-task` label + assignee, landing on a small in-cluster
+  receiver. STAGED only; requires the security review in the handoff before any
+  apply.
 - WS-24: see docs/swarm/handoffs/WS-24-handoff.md (upstream reference/observability@863d498)
 - WS-25: see docs/swarm/handoffs/WS-25-handoff.md

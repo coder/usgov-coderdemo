@@ -1,0 +1,109 @@
+# Deployment + container for the WS-23 agent-attribution receiver.
+#
+# Runs the pure-stdlib receiver.py from the `agent-attribution-receiver`
+# ConfigMap on a stock python image mirrored into ECR (GovCloud has no
+# pull-through cache). No custom image build is required, so this is fully
+# reversible: delete the Deployment, Service, ConfigMap, and ExternalSecret to
+# revert.
+#
+# Lives in the `coder` namespace so the call to the Coder API is a single
+# in-namespace hop to coder.coder.svc.cluster.local, mirroring the proven Red
+# Hat Summit bridge placement.
+#
+# IMAGE: confirm the ECR account id and that the tag is mirrored. Mirror with:
+#   crane copy docker.io/library/python:3.12-slim \
+#     <acct>.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/library/python:3.12-slim
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-attribution-bridge
+  namespace: coder
+  labels:
+    app.kubernetes.io/name: agent-attribution-bridge
+    app.kubernetes.io/part-of: usgov-coderdemo
+    app.kubernetes.io/component: gitlab-coder-attribution
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-attribution-bridge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-attribution-bridge
+        app.kubernetes.io/part-of: usgov-coderdemo
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: receiver
+          image: 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/library/python:3.12-slim
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "/app/receiver.py"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: LISTEN_ADDR
+              value: ":8080"
+            - name: CODER_URL
+              value: "http://coder.coder.svc.cluster.local"
+            - name: CODER_PUBLIC_URL
+              value: "https://dev.usgov.coderdemo.io"
+            - name: GITLAB_API_URL
+              value: "https://gitlab.usgov.coderdemo.io/api/v4"
+            - name: TEMPLATE_NAME
+              value: "claude-code"
+            - name: TASK_LABEL
+              value: "coder-task"
+            - name: CODER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: agent-attribution-bridge
+                  key: coder-token
+            - name: WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: agent-attribution-bridge
+                  key: webhook-secret
+            - name: GITLAB_PAT
+              valueFrom:
+                secretKeyRef:
+                  name: agent-attribution-bridge
+                  key: gitlab-pat
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "48Mi"
+            limits:
+              cpu: "250m"
+              memory: "128Mi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          volumeMounts:
+            - name: app
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: app
+          configMap:
+            name: agent-attribution-receiver
