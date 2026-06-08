@@ -1,9 +1,29 @@
 # deploy/istio
 
-Apply-ready Istio manifests for the GovCloud Coder demo. These are the design
-artifacts for issue #30. NOTHING here is applied to the live cluster by this
-workstream; the orchestrator runs the live mutations in the sequenced rollout
-described in [docs/plans/istio-implementation.md](../../docs/plans/istio-implementation.md).
+Istio manifests for the GovCloud Coder demo. These are the design artifacts for
+issue #30. The sequenced rollout is in
+[docs/plans/istio-implementation.md](../../docs/plans/istio-implementation.md).
+
+## Live rollout status
+
+The orchestrator has applied and verified the following on the live cluster
+(PERMISSIVE phase, nginx still serving all hostnames in parallel):
+
+- Istio 1.30.1 control plane + ingress gateway installed (own NLB, ACM cert).
+- Gateway + per-host VirtualServices applied; validated end to end via the
+  gateway NLB without changing production DNS (Grafana, Coder, Keycloak, GitLab
+  all 200). The Keycloak Account Console cookie fix is proven (`Secure;
+  SameSite=None`).
+- Mesh-wide PERMISSIVE PeerAuthentication, RDS ServiceEntry + DestinationRule.
+- Sidecars injected and validated at 100% mTLS through the gateway for
+  `keycloak`, `gitlab`, and `coder` (control plane + both provisioners).
+  `coder-workspaces` is intentionally NOT injected.
+- Kiali + the Istio Grafana dashboards are live; Kiali is fronted by Keycloak
+  OpenID SSO (anonymous access disabled).
+
+Still pending: production DNS cutover host by host, the mesh-wide STRICT flip
+(with the per-workload metrics/probe carve-outs below set to their STRICT form),
+and decommissioning ingress-nginx.
 
 ## What is here
 
@@ -15,7 +35,7 @@ described in [docs/plans/istio-implementation.md](../../docs/plans/istio-impleme
 | `gateway/envoyfilter-xforwarded-proto.yaml` | OPTIONAL gateway-wide scheme override; alternative to the per-host header set. Not applied by default. |
 | `security/peerauthentication-permissive.yaml` | Mesh-wide PERMISSIVE (the rollout default). |
 | `security/peerauthentication-strict.yaml` | Mesh-wide STRICT (the FINAL state). Do not apply until injection is complete. |
-| `security/peerauthentication-keycloak-mgmt.yaml` | Optional port-9000 exception for Keycloak probes. |
+| `security/peerauthentication-keycloak-mgmt.yaml` | Port-9000 carve-out for Keycloak probes. Currently applied in its interim PERMISSIVE form; set `mtls.mode: STRICT` (keeping port 9000 PERMISSIVE) at the STRICT step so it does not weaken the whole workload. |
 | `security/serviceentry-rds.yaml`, `security/destinationrule-rds.yaml` | Mesh-external RDS (app-originated TLS; sidecar TLS DISABLE). |
 | `namespace-injection.md` | Which namespaces to inject, in what order, and what to exclude. |
 
@@ -29,9 +49,9 @@ described in [docs/plans/istio-implementation.md](../../docs/plans/istio-impleme
   - `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/istio/pilot:1.30.1`
   - `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/istio/proxyv2:1.30.1`
   - `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/istio/install-cni:1.30.1`
-- `istioctl` 1.30.1 is required on the operator host and is NOT yet installed in
-  this workspace; download it on a connected host and copy the binary in
-  (air-gapped), matching the control-plane version.
+- `istioctl` 1.30.1 is required on the operator host. It is installed in this
+  workspace at `~/.local/bin/istioctl` (downloaded on a connected host and used
+  against the cluster via the kubeconfig), matching the control-plane version.
 
 ## Apply order (run by the orchestrator, not here)
 
