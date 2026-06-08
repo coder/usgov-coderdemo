@@ -3,7 +3,9 @@
 setup-pm-persona.py - create the project-manager (PM) demo persona end to end:
 a Keycloak user in realm `coder`, the matching GitLab user, and a project
 membership on `coderdemo/coder-templates` so the PM can create and assign the
-issues that drive the WS-23 GitLab to Coder agent-attribution flow.
+issues that drive the WS-23 GitLab to Coder bridge (the assignee becomes the
+Coder workspace/task owner when the issue carries a coder-workspace or
+coder-agent label).
 
 PERSONA
   Morgan Pierce, username `morgan.pm`, a non-technical coordinator who assigns

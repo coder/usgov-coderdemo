@@ -1,26 +1,30 @@
 #!/usr/bin/env python3
 """
 setup-gitlab-agent-webhook.py - configure the GitLab project webhook that drives
-the WS-23 GitLab to Coder agent-attribution flow, and (optionally) simulate the
-attributed Task creation so the demo can run before the receiver is deployed.
+the WS-23 GitLab to Coder bridge, and (optionally) simulate the attributed
+spawn so the demo can run before the bridge is deployed.
 
 DESIGN (see docs/architecture/gitlab-coder-agent-attribution.md)
   A GitLab Issue-events webhook on coderdemo/coder-templates (id 2) delivers
-  issue events to the in-cluster receiver (`agent-attribution-bridge`, ns coder).
-  The receiver verifies the shared X-Gitlab-Token, and for an issue that has the
-  `coder-task` label AND an assignee, creates a Coder Task owned by the assignee:
-  POST /api/v2/tasks/{assignee}. Attribution is by the assignee, never the author.
+  issue events to the in-cluster bridge (`agent-attribution-bridge`, ns coder).
+  The bridge verifies the shared X-Gitlab-Token and, for an issue that has a
+  coder-* label AND an assignee, attributes the work to the assignee:
+    - coder-workspace[:template] -> POST /api/v2/users/<assignee>/workspaces
+    - coder-agent[:template]     -> POST /api/v2/tasks/<assignee>   (AI task)
+    - coder-task[:template]      -> alias of coder-agent
+  The owner is always the assignee, never the author. Agent wins when both
+  labels are present, mirroring the Red Hat Summit bridge.
 
 WHAT IT DOES (plan first, mutate only with --apply)
   Webhook mode (default):
     - resolve project coderdemo/coder-templates (id 2) and its existing hooks
     - idempotently create or update an Issue-events webhook pointing at the
-      receiver URL, with token verification, all other event types disabled
+      bridge URL, with token verification, all other event types disabled
   Simulate mode (--simulate --issue N): no webhook needed; reproduces exactly
-  what the receiver would do for issue N:
+  what the bridge would do for issue N:
     - read the issue (assignee, labels, title, body) via the GitLab API
-    - resolve the claude-code active template version via the Coder API
-    - print the exact POST /api/v2/tasks/{assignee} request; with --apply, send it
+    - pick the mode from the labels and resolve the template active version
+    - print the exact attributed call; with --apply, send it
 
 CREDENTIALS (never logged; lengths only)
   GitLab admin PAT: $GITLAB_ADMIN_PAT, else ASM usgov-coderdemo/gitlab/admin-pat.
@@ -32,9 +36,9 @@ CREDENTIALS (never logged; lengths only)
 
 SAFETY
   --plan (default) only performs read-only GETs and prints intended actions.
-  --apply performs the webhook create/update (and, in simulate, the task POST).
-  This script never requires the receiver to be running; --check-receiver probes
-  it but a failed probe is a warning, not an error.
+  --apply performs the webhook create/update (and, in simulate, the spawn).
+  This script never requires the bridge to be running; --check-bridge probes it
+  but a failed probe is a warning, not an error.
 
 Usage:
     python3 scripts/setup-gitlab-agent-webhook.py                       # plan
@@ -42,12 +46,12 @@ Usage:
     python3 scripts/setup-gitlab-agent-webhook.py --simulate --issue 7   # print
     python3 scripts/setup-gitlab-agent-webhook.py --simulate --issue 7 --apply
 Options:
-    --apply              perform mutations (register hook, or send the task POST)
+    --apply              perform mutations (register hook, or send the spawn)
     --plan               read-only plan (default)
-    --url URL            receiver webhook URL (default in-cluster Service URL)
-    --simulate           simulate the receiver for a single issue (--issue N)
+    --url URL            bridge webhook URL (default in-cluster Service URL)
+    --simulate           simulate the bridge for a single issue (--issue N)
     --issue N            issue IID for --simulate
-    --check-receiver     probe the receiver /readyz (warning only)
+    --check-bridge       probe the bridge /readyz (warning only)
     --verbose            print extra detail
 """
 import argparse
@@ -68,10 +72,12 @@ ASM_GITLAB_PAT_NAME = "usgov-coderdemo/gitlab/admin-pat"
 
 PROJECT_ID = 2  # coderdemo/coder-templates
 PROJECT_PATH = "coderdemo/coder-templates"
-DEFAULT_RECEIVER_URL = (
+DEFAULT_BRIDGE_URL = (
     "http://agent-attribution-bridge.coder.svc.cluster.local:8080/webhook")
-TASK_LABEL = "coder-task"
-TEMPLATE_NAME = "claude-code"
+DEFAULT_TEMPLATE = "claude-code"
+WORKSPACE_LABEL = "coder-workspace"
+AGENT_LABELS = ("coder-agent", "coder-task")  # coder-task aliases coder-agent
+GIT_REPO_PARAM = "git_repo"
 CODER_ORG_ID = "5de29a6d-8836-4643-a42b-2cb807c8e3e2"  # org "coder"
 
 
@@ -200,18 +206,49 @@ def coder_api(method, path, token, body=None):
     return http(method, CODER_URL + path, {"Coder-Session-Token": token}, body)
 
 
-def resolve_template_version(token):
-    """Return (template_version_id, note) for the claude-code active version."""
+def resolve_template_version(token, name):
+    """Return (template_version_id, note) for the named template's active version."""
     status, templates = coder_api("GET", "/api/v2/templates", token)
     if status != 200 or not isinstance(templates, list):
         return None, f"GET /api/v2/templates -> {status}"
     for t in templates:
-        if t.get("name") == TEMPLATE_NAME:
-            return t.get("active_version_id"), f"template {TEMPLATE_NAME} active version"
-    return None, f"template {TEMPLATE_NAME} not found"
+        if t.get("name") == name:
+            return t.get("active_version_id"), f"template {name} active version"
+    return None, f"template {name} not found"
 
 
-# --- name + prompt ---------------------------------------------------------
+def template_declares_git_repo(token, version_id):
+    """True when the template version declares the git_repo rich parameter."""
+    if not version_id:
+        return False
+    status, params = coder_api(
+        "GET", f"/api/v2/templateversions/{version_id}/rich-parameters", token)
+    if status != 200 or not isinstance(params, list):
+        return False
+    return any(p.get("name") == GIT_REPO_PARAM for p in params)
+
+
+# --- mode + name + prompt --------------------------------------------------
+
+def extract_mode(labels):
+    """Return (mode, slug): 'agent'|'workspace'|None. Agent wins when both
+    present. Labels may be strings (REST issue API) or {title} dicts."""
+    titles = []
+    for raw in labels or []:
+        titles.append((raw.get("title") if isinstance(raw, dict) else str(raw)).strip())
+    ws = (None, "")
+    for title in titles:
+        for base in AGENT_LABELS:
+            if title == base:
+                return "agent", ""
+            if title.startswith(base + ":"):
+                return "agent", title.split(":", 1)[1].strip().lower()
+        if title == WORKSPACE_LABEL:
+            ws = ("workspace", "")
+        elif title.startswith(WORKSPACE_LABEL + ":"):
+            ws = ("workspace", title.split(":", 1)[1].strip().lower())
+    return ws
+
 
 def workspace_name(project_path, iid):
     repo = project_path.rsplit("/", 1)[-1].lower()
@@ -224,7 +261,7 @@ def workspace_name(project_path, iid):
     return repo + suffix
 
 
-def seed_prompt(issue, project_path, iid):
+def seed_prompt(issue, project_path, iid, repo_web_url):
     title = (issue or {}).get("title", "")
     desc = (issue or {}).get("description", "") or ""
     url = (issue or {}).get("web_url", "")
@@ -233,13 +270,14 @@ def seed_prompt(issue, project_path, iid):
                 f"Title: {title}\n\n")
         if desc.strip():
             body += f"Description:\n\n{desc}\n\n"
-        body += (f"Source: {url}\n\n"
-                 "Investigate the request, make the needed changes in the "
-                 "workspace repo, then push a branch and open a Merge Request "
-                 f"that references the issue (Closes #{iid}).")
+        body += (f"Source: {url}\nRepository: {repo_web_url}\n\n"
+                 "Clone the repository above, investigate the request, and make "
+                 "the needed changes. When you are done, push a branch and open a "
+                 f"Merge Request that references the issue (Closes #{iid}).")
         return body
-    return (f"Work on GitLab issue {url}. Investigate, make the changes, then "
-            f"push a branch and open a Merge Request that closes issue #{iid}.")
+    return (f"Work on GitLab issue {url} in repository {repo_web_url}. Clone the "
+            f"repo, investigate, make the changes, then open a Merge Request that "
+            f"closes issue #{iid}.")
 
 
 # --- webhook registration --------------------------------------------------
@@ -247,13 +285,13 @@ def seed_prompt(issue, project_path, iid):
 def register_webhook(url, apply, verbose):
     pat, pat_source = gitlab_pat()
     secret, secret_source = webhook_secret()
-    print(f"Receiver URL         : {url}")
+    print(f"Bridge URL           : {url}")
     print(f"GitLab admin PAT     : {pat_source}")
     print(f"Webhook shared secret: {secret_source} ({mask_len(secret or '')})")
     if url.startswith("http://"):
         print("NOTE: an in-cluster http:// target requires GitLab admin setting "
               "'Allow requests to the local network from webhooks', or expose the "
-              "receiver via ingress and use an https:// URL.")
+              "bridge via ingress and use an https:// URL.")
     if pat is None:
         print("\nNo GitLab admin PAT available; cannot read or register hooks.")
         print("Provide $GITLAB_ADMIN_PAT or populate ASM "
@@ -324,63 +362,80 @@ def simulate(iid, apply, verbose):
     assignees = issue.get("assignees") or []
     assignee = assignees[0]["username"] if assignees else None
     labels = issue.get("labels") or []
-    has_label = TASK_LABEL in labels or any(
-        str(l).startswith(TASK_LABEL + ":") for l in labels)
+    mode, slug = extract_mode(labels)
 
     print(f"Issue #{iid}: {issue.get('title', '')!r}")
     print(f"  labels   : {labels}")
     print(f"  assignee : {assignee or '(none)'}")
-    if not has_label:
-        print(f"NO-OP: issue lacks the `{TASK_LABEL}` label.")
+    print(f"  mode     : {mode or '(none)'}" + (f" (slug {slug})" if slug else ""))
+    if mode is None:
+        print(f"NO-OP: issue lacks a {WORKSPACE_LABEL}/{AGENT_LABELS[0]} label.")
         return 0
     if not assignee:
-        print("NO-OP: issue has no assignee (assign it to attribute the task).")
+        print("NO-OP: issue has no assignee (assign it to attribute the spawn).")
         return 0
 
     token, token_source = coder_token()
     if token is None:
         print("simulate requires a Coder token to resolve the template version.")
         return 1
-    tv_id, tv_note = resolve_template_version(token)
+    template = slug or DEFAULT_TEMPLATE
+    tv_id, tv_note = resolve_template_version(token, template)
     name = workspace_name(PROJECT_PATH, iid)
-    prompt = seed_prompt(issue, PROJECT_PATH, iid)
+    project_web = issue.get("web_url", "").rsplit("/-/issues/", 1)[0]
 
     print(f"\nCoder token  : {token_source}")
     print(f"Template     : {tv_note} -> {tv_id}")
-    print("\nAttributed Task request (owner = assignee):")
-    print(f"  POST {CODER_URL}/api/v2/tasks/{assignee}")
-    print(f"  body: {json.dumps({'template_version_id': tv_id, 'name': name, 'input': '<issue prompt>'} )}")
-    if verbose:
-        print(f"\n  input prompt:\n{prompt}\n")
+
+    if mode == "agent":
+        prompt = seed_prompt(issue, PROJECT_PATH, iid, project_web)
+        print("\nAttributed AI task request (owner = assignee):")
+        print(f"  POST {CODER_URL}/api/v2/tasks/{assignee}")
+        print("  body: " + json.dumps(
+            {"template_version_id": tv_id, "name": name, "input": "<issue prompt>"}))
+        if verbose:
+            print(f"\n  input prompt:\n{prompt}\n")
+        body = {"template_version_id": tv_id, "name": name, "input": prompt}
+        path = f"/api/v2/tasks/{assignee}"
+    else:
+        rich = None
+        if template_declares_git_repo(token, tv_id):
+            rich = [{"name": GIT_REPO_PARAM, "value": project_web}]
+        print("\nAttributed workspace request (owner = assignee):")
+        print(f"  POST {CODER_URL}/api/v2/users/{assignee}/workspaces")
+        shown = {"template_version_id": tv_id, "name": name}
+        if rich:
+            shown["rich_parameter_values"] = rich
+        print("  body: " + json.dumps(shown))
+        body = {"template_version_id": tv_id, "name": name}
+        if rich:
+            body["rich_parameter_values"] = rich
+        path = f"/api/v2/users/{assignee}/workspaces"
 
     if tv_id is None:
-        print("\nCannot send: no AI-task template version resolved.")
+        print("\nCannot send: no template version resolved.")
         return 1
     if not apply:
-        print("\n(read-only; no task created. Re-run with --apply to send.)")
+        print("\n(read-only; nothing created. Re-run with --apply to send.)")
         return 0
 
-    code, res = coder_api("POST", f"/api/v2/tasks/{assignee}", token, {
-        "template_version_id": tv_id,
-        "name": name,
-        "input": prompt,
-    })
+    code, res = coder_api("POST", path, token, body)
     ok = code == 201
     if ok:
-        print(f"\nok: task created, owner {assignee}, workspace {name} "
+        print(f"\nok: {mode} created, owner {assignee}, workspace {name} "
               f"(id {res.get('id') if isinstance(res, dict) else '?'})")
     else:
-        print(f"\nFAIL: POST tasks/{assignee} -> {code} {res}")
+        print(f"\nFAIL: POST {path} -> {code} {res}")
     return 0 if ok else 1
 
 
-def check_receiver(url):
+def check_bridge(url):
     base = url.rsplit("/webhook", 1)[0]
     try:
         status, _ = http("GET", base + "/readyz", {})
-        print(f"receiver /readyz -> {status}")
+        print(f"bridge /readyz -> {status}")
     except Exception as e:  # noqa: BLE001 - probe is best-effort
-        print(f"receiver probe failed (warning only): {e}")
+        print(f"bridge probe failed (warning only): {e}")
 
 
 # --- main ------------------------------------------------------------------
@@ -389,20 +444,19 @@ def main():
     ap = argparse.ArgumentParser(description="Configure the WS-23 GitLab webhook.")
     ap.add_argument("--apply", action="store_true", help="perform mutations")
     ap.add_argument("--plan", action="store_true", help="read-only plan (default)")
-    ap.add_argument("--url", default=DEFAULT_RECEIVER_URL,
-                    help="receiver webhook URL")
+    ap.add_argument("--url", default=DEFAULT_BRIDGE_URL, help="bridge webhook URL")
     ap.add_argument("--simulate", action="store_true",
-                    help="simulate the receiver for a single issue")
+                    help="simulate the bridge for a single issue")
     ap.add_argument("--issue", type=int, help="issue IID for --simulate")
-    ap.add_argument("--check-receiver", action="store_true",
-                    help="probe the receiver /readyz (warning only)")
+    ap.add_argument("--check-bridge", action="store_true",
+                    help="probe the bridge /readyz (warning only)")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
     if args.apply and args.plan:
         sys.exit("--apply and --plan are mutually exclusive")
 
-    if args.check_receiver:
-        check_receiver(args.url)
+    if args.check_bridge:
+        check_bridge(args.url)
 
     if args.simulate:
         if args.issue is None:

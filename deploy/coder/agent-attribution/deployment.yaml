@@ -1,10 +1,12 @@
-# Deployment + container for the WS-23 agent-attribution receiver.
+# Deployment + container for the WS-23 GitLab to Coder bridge.
 #
-# Runs the pure-stdlib receiver.py from the `agent-attribution-receiver`
+# Runs the pure-stdlib bridge.py from the `agent-attribution-receiver`
 # ConfigMap on a stock python image mirrored into ECR (GovCloud has no
 # pull-through cache). No custom image build is required, so this is fully
 # reversible: delete the Deployment, Service, ConfigMap, and ExternalSecret to
-# revert.
+# revert. The service replicates the Red Hat Summit bridge
+# (reference/demo-aigov-rhsummit-2026/services/bridge) adapted for GitLab plus
+# the Coder 2.34 Tasks API; see docs/architecture/gitlab-coder-agent-attribution.md.
 #
 # Lives in the `coder` namespace so the call to the Coder API is a single
 # in-namespace hop to coder.coder.svc.cluster.local, mirroring the proven Red
@@ -40,10 +42,10 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: receiver
+        - name: bridge
           image: 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/library/python:3.12-slim
           imagePullPolicy: IfNotPresent
-          command: ["python3", "/app/receiver.py"]
+          command: ["python3", "/app/bridge.py"]
           ports:
             - name: http
               containerPort: 8080
@@ -56,10 +58,16 @@ spec:
               value: "https://dev.usgov.coderdemo.io"
             - name: GITLAB_API_URL
               value: "https://gitlab.usgov.coderdemo.io/api/v4"
-            - name: TEMPLATE_NAME
+            - name: DEFAULT_TEMPLATE
               value: "claude-code"
+            - name: WORKSPACE_LABEL
+              value: "coder-workspace"
+            - name: AGENT_LABEL
+              value: "coder-agent"
             - name: TASK_LABEL
               value: "coder-task"
+            - name: LOG_LEVEL
+              value: "info"
             - name: CODER_TOKEN
               valueFrom:
                 secretKeyRef:

@@ -1,4 +1,4 @@
-# ClusterIP Service for the agent-attribution receiver. GitLab (in-cluster on
+# ClusterIP Service for the GitLab to Coder bridge. GitLab (in-cluster on
 # gitlab-0) delivers webhooks to
 # http://agent-attribution-bridge.coder.svc.cluster.local:8080/webhook.
 # No public ingress is required for the demo.
