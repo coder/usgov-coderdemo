@@ -1,0 +1,124 @@
+# AI providers + model presets: declarative source of truth (post-seed).
+#
+# WHY THIS FILE EXISTS
+# Since Coder v2.34 the AI Gateway providers live in the DATABASE, managed at
+# https://dev.usgov.coderdemo.io/ai/settings or the AI Providers API
+# (/api/v2/ai/providers). The CODER_AI_GATEWAY_PROVIDER_* Helm env vars are
+# DEPRECATED: they SEED the database ONCE on first boot, then the database is
+# authoritative. Changing a seeded env var later makes coderd fail to start
+# (drift guard). See deploy/coder/README.md "provider env vars seed the DB ONCE".
+#
+# Therefore providers and models are reconciled through the API, never through
+# Helm. Treat deploy/coder/values.yaml CODER_AI_GATEWAY_PROVIDER_* as a frozen
+# one-time seed; this file is the ongoing source of truth.
+#   reconcile:  scripts/reconcile-ai-providers.py --dry-run   # read-only plan
+#   apply:      scripts/reconcile-ai-providers.py --apply     # operator only
+#
+# ONE SHARED PROVIDER STORE (verified, v2.34.0)
+# The ai_providers table backs BOTH paths:
+#   1. AI Gateway / aibridge in-workspace path
+#      POST /api/v2/aibridge/<provider-name>/v1/...
+#   2. Coder Agents control-plane model picker
+#      GET /api/experimental/chats/models reads the SAME ai_providers rows
+#      (getUserChatProviderAvailability -> GetAIProviders). The legacy separate
+#      chat-provider API now returns HTTP 410 "Use AI provider APIs instead".
+# Provider NAME is the routing id and must stay lowercase-hyphenated. The
+# anthropic-direct provider must be named exactly "anthropic" because the
+# claude-code workspace module hardcodes
+# ANTHROPIC_BASE_URL=<access-url>/api/v2/aibridge/anthropic.
+#
+# MODELS ARE A SEPARATE TABLE (chat_model_configs)
+# AIProvider rows carry no model list (only Bedrock settings carry model +
+# small_fast_model). The model picker is populated from chat_model_configs,
+# managed via /api/experimental/chats/model-configs, each row tied to an
+# enabled provider by ai_provider_id. A model preset can only be created while
+# its provider is enabled (the API returns 412 otherwise). Live enumeration on
+# this deployment showed ZERO model presets, so the picker currently lists
+# providers with an empty model set; the presets below populate it.
+#
+# KEYS NEVER LIVE IN THIS FILE
+# Provider keys are referenced by env var name (key_from_env). The reconciler
+# reads the value from the environment and passes it via stdin/body, never via
+# argv or a URL, and never logs it. Anthropic-direct and OpenAI use a static
+# key; Bedrock uses IRSA (no static key, AWS SDK default credential chain).
+
+version: 1
+
+providers:
+  # --- Anthropic direct (PRIMARY, demo default) --------------------------
+  # Egress to api.anthropic.com leaves the VPC via the NAT gateway. The live
+  # key is a placeholder (masked sk-a...ings); apply with ANTHROPIC_KEY set to
+  # the real sk-ant-... value to replace it. Name MUST be "anthropic".
+  - type: anthropic
+    name: anthropic
+    display_name: "Anthropic (direct)"
+    enabled: true
+    base_url: "https://api.anthropic.com"
+    key_from_env: ANTHROPIC_KEY
+    models:
+      # Model generations match the live deployment config
+      # (deployment/config model=claude-sonnet-4-5-20250929,
+      # small_fast_model=claude-haiku-4-5-20251001).
+      - model: "claude-sonnet-4-5-20250929"
+        display_name: "Claude Sonnet 4.5"
+        enabled: true
+        default: true
+        context_limit: 200000
+      - model: "claude-haiku-4-5-20251001"
+        display_name: "Claude Haiku 4.5"
+        enabled: true
+        context_limit: 200000
+
+  # --- OpenAI direct (SECONDARY) -----------------------------------------
+  # Routes through aibridge's OpenAI client. aibridge route:
+  # POST /api/v2/aibridge/openai/v1/chat/completions. Default upstream base is
+  # https://api.openai.com/v1/. Apply with OPENAI_KEY set to the real sk-...
+  # value. Model ids are current GA OpenAI ids and are operator-tunable; they
+  # are validated post-apply against the live picker (the create API only
+  # enforces a provider-prefix check, not a fixed catalog).
+  - type: openai
+    name: openai
+    display_name: "OpenAI (direct)"
+    enabled: true
+    base_url: "https://api.openai.com/v1/"
+    key_from_env: OPENAI_KEY
+    models:
+      - model: "gpt-5.1"
+        display_name: "GPT-5.1"
+        enabled: true
+        context_limit: 400000
+      - model: "gpt-4.1"
+        display_name: "GPT-4.1"
+        enabled: true
+        context_limit: 1047576
+
+  # --- Anthropic on Bedrock (PRE-STAGED, DISABLED) -----------------------
+  # In-boundary GovCloud path via IRSA (no static key; the AWS SDK default
+  # credential chain resolves the web-identity token from the annotated
+  # coder/coder service account). Pre-staged DISABLED: Claude Sonnet 4.5 model
+  # access on GovCloud Bedrock is still gated, and Claude Code's anthropic-beta
+  # header is rejected by GovCloud Bedrock (coder/aibridge#221). A future
+  # Bedrock swap is: flip enabled to true and re-run the reconciler. NAME stays
+  # "anthropic-bedrock"; to route Claude Code at Bedrock instead of direct,
+  # rename it to "anthropic" (and rename the direct provider) at swap time.
+  #
+  # NOTE: the live deployment currently has this provider ENABLED (seeded), so
+  # a dry-run will show "DISABLE anthropic-bedrock". That is the intended
+  # staged posture; set enabled: true here if you want to keep Bedrock live.
+  - type: bedrock
+    name: anthropic-bedrock
+    display_name: "Anthropic on Bedrock (GovCloud, IRSA)"
+    enabled: false
+    base_url: ""
+    auth: irsa            # no static key; do not set key_from_env for bedrock
+    bedrock:
+      region: "us-gov-west-1"
+      model: "us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      small_fast_model: "amazon.nova-pro-v1:0"
+    models:
+      # Only reconciled once the provider is enabled (create API requires an
+      # enabled provider). Listed here so the Bedrock swap is a one-line flip.
+      - model: "us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0"
+        display_name: "Claude Sonnet 4.5 (Bedrock GovCloud)"
+        enabled: true
+        context_limit: 200000
