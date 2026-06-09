@@ -115,9 +115,20 @@ coder:
     # Coder enables a built-in GitHub login + GitHub external-auth provider by
     # default (Coder's own hosted GitHub app), both of which call github.com,
     # i.e. OUT of the GovCloud boundary. Disable it so login is Keycloak-only
-    # (plus the local password owner) and git stays on the in-cluster GitLab.
+    # and git stays on the in-cluster GitLab.
     - name: CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE
       value: "false"
+
+    # Force every interactive login through Keycloak (OIDC). Disabling built-in
+    # password authentication hides the password form and rejects password
+    # logins for ALL users, including owners (coderd/userauth.go blocks the
+    # request with no owner exception). The bootstrap `admin` owner therefore
+    # signs in only via SSO afterward; automation uses a pre-minted API token
+    # (token auth is unaffected by this flag). Break-glass recovery if OIDC is
+    # unavailable: `kubectl exec` the coder pod and run
+    # `coder server create-admin-user`, or set this back to "false".
+    - name: CODER_DISABLE_PASSWORD_AUTH
+      value: "true"
 
     # --- Git external auth: in-cluster GitLab (in-boundary) ----------------
     # Authenticates git operations inside workspaces against the in-cluster
