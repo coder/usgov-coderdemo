@@ -1,4 +1,4 @@
-# Claude Code on Coder Agents (GovCloud demo template)
+# Claude Code on Coder Agents (CI / UBI9 demo template)
 
 Coder workspace template that runs **Claude Code as a Coder Agent** inside a
 Kubernetes pod on the EKS cluster, wired through the **Coder AI Gateway (AI
@@ -11,8 +11,30 @@ Launching the template as a **Coder Task** opens the Claude Code chat UI and
 seeds the agent with the task prompt.
 
 - `main.tf`: the template (providers `coder` + `kubernetes`).
-- Workspace image: `codercom/enterprise-base:ubuntu-noble-20260601`, pulled
-  from the ECR mirror.
+- `metadata.json`: `display_name` + `icon`, applied post-push by the
+  `push-template` CI job (`coder templates edit`).
+- Workspace image: `ubi9-node-workspace:latest`, built by this project's GitLab
+  CI pipeline (Kaniko) and pushed to the project's GitLab Container Registry.
+
+## Workspace image and securityContext
+
+The image is the CI-built **`<image_registry>/ubi9-node-workspace:latest`**,
+where the `push-template` job sets `image_registry=$CI_REGISTRY_IMAGE`
+(`registry.usgov.coderdemo.io/coderdemo/coder-templates`). The image:
+
+- runs as **uid 1001** (user `coder`),
+- owns `/home/coder` by **group 0**, group-writable (`chgrp -R 0` + `chmod -R
+  g=u`).
+
+The pod therefore sets `run_as_user = 1001`, `run_as_group = 0`, and
+`fs_group = 0`, so the mounted `/home` PVC lands on group 0 (group-writable) and
+the Coder agent can write `/home/coder` on EKS. The container command wraps the
+agent init script in the image's `uid_entrypoint`, which normalizes `HOME`/`USER`.
+
+> The project's Container Registry is private, so a real workspace boot needs a
+> `kubernetes.io/dockerconfigjson` pull Secret in `var.namespace`; set its name
+> via `image_pull_secret`. Template import (`terraform plan`) does not pull the
+> image, so the default empty value is fine for CI import and verification.
 
 ## What's inside
 
@@ -28,6 +50,10 @@ seeds the agent with the task prompt.
 Parameters: `cpu`, `memory`, `disk_size`, and `ai_prompt` (fallback prompt for
 non-Task builds).
 
+Variables: `namespace` (default `coder-workspaces`), `image_registry` (set to
+`$CI_REGISTRY_IMAGE` by CI), `image_pull_secret` (default empty), and
+`use_kubeconfig` (default `false`).
+
 ## AI Gateway wiring (end to end)
 
 1. The `claude_code` module is configured with `enable_aibridge = true`. On the
@@ -41,151 +67,40 @@ non-Task builds).
    token) to match the AI Gateway client contract in `deploy/CONVENTIONS.md`.
 3. Claude Code calls `ANTHROPIC_BASE_URL`. The Coder AI Gateway authenticates
    the session token, applies governance/audit, and forwards the request to the
-   active provider:
-   - **Anthropic-direct** (primary): egress via the NAT gateway.
-   - **Bedrock** (secondary): IRSA on the `coder/coder` service account, model
-     `us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0`, in-region only.
+   active provider (Anthropic-direct primary / Bedrock secondary).
 
 No Anthropic key is stored in the workspace; the session token is the only
 credential and it is scoped to the workspace owner.
 
-### Model selection
-
-Model is left at the module default on purpose, because the requested model
-name must match whichever provider the Gateway has live:
-
-- Anthropic-direct: an Anthropic id, e.g. `claude-sonnet-4-5-20250929`.
-- Bedrock (GovCloud): the inference profile
-  `us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0`.
-
-Pin one by uncommenting `model = "..."` in the module block once the live
-provider is confirmed. Bedrock Claude access was still gated at authoring time
-(see `STATUS.md`), so the safe default is to let Claude Code/Gateway negotiate.
-
 ### Why module 4.7.3 and `enable_aibridge` (not `enable_ai_gateway`)
 
-Verified against the Coder registry:
+- `deploy/CONVENTIONS.md` and `versions.lock.yaml` pin the claude-code module to
+  **4.7.3**, where the input is `enable_aibridge`.
+- The `enable_ai_gateway` rename, and the removal of the bundled AgentAPI
+  integration and the `task_app_id` output that `coder_ai_task` requires, landed
+  in the **5.x** line. Staying on 4.7.3 is what makes the Coder Tasks wiring
+  here work.
 
-- `deploy/CONVENTIONS.md` and `versions.lock.yaml` pin the claude-code module
-  to **4.7.3**.
-- In **4.7.x the input is `enable_aibridge`**. The `enable_ai_gateway` rename
-  (and an `ANTHROPIC_AUTH_TOKEN` the module sets itself) only appear in the
-  **5.x** line.
-- The 5.x refactor **removed** the bundled AgentAPI integration and the
-  `task_app_id` output, which `coder_ai_task` requires. Staying on 4.7.3 is what
-  makes the Coder Tasks wiring in this template work.
+## Git external auth
 
-If the project later moves to claude-code 5.x, switch `enable_aibridge` →
-`enable_ai_gateway`, drop the explicit `coder_env.anthropic_auth_token`, and add
-a standalone `agentapi` module to supply `task_app_id` for `coder_ai_task`.
+Declaring `data.coder_external_auth.gitlab` makes the workspace REQUIRE a GitLab
+login (`id = "gitlab"` matches `CODER_EXTERNAL_AUTH_0_ID` on the Coder server).
+The agent's git credential helper injects a short-lived OAuth token for
+clone/fetch/push to `gitlab.usgov.coderdemo.io`; no PATs or SSH keys live in the
+workspace.
 
 ## Cluster prerequisites
 
 The platform layer (Coder server + ingress + namespaces) is out of scope for
-this directory. Before pushing/using the template, ensure:
+this directory. Before a workspace can boot:
 
-1. **Coder server** 2.34.0 with the AI Governance add-on license and the AI
-   Gateway providers configured (Anthropic-direct + Bedrock). See
-   `deploy/coder/`.
-2. **Wildcard access URL** set so subdomain apps work
-   (`CODER_WILDCARD_ACCESS_URL=*.usgov.coderdemo.io`). The Claude Code web app
-   and code-server use `subdomain = true`.
-3. **Workspaces namespace** exists:
-
-   ```bash
-   kubectl create namespace coder-workspaces
-   ```
-
-4. **Provisioner RBAC**: the Coder provisioner (service account `coder` in the
-   `coder` namespace) must be able to manage pods/PVCs in `coder-workspaces`.
-   Example (apply with the platform layer, not from this directory):
-
-   ```yaml
-   apiVersion: rbac.authorization.k8s.io/v1
-   kind: Role
-   metadata:
-     name: coder-workspace-provisioner
-     namespace: coder-workspaces
-   rules:
-     - apiGroups: [""]
-       resources: ["pods", "persistentvolumeclaims"]
-       verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
-     - apiGroups: [""]
-       resources: ["pods/exec", "pods/log"]
-       verbs: ["get", "create"]
-     - apiGroups: [""]
-       resources: ["events"]
-       verbs: ["get", "list", "watch"]
-   ---
-   apiVersion: rbac.authorization.k8s.io/v1
-   kind: RoleBinding
-   metadata:
-     name: coder-workspace-provisioner
-     namespace: coder-workspaces
-   roleRef:
-     apiGroup: rbac.authorization.k8s.io
-     kind: Role
-     name: coder-workspace-provisioner
-   subjects:
-     - kind: ServiceAccount
-       name: coder
-       namespace: coder
-   ```
-
-5. **Image pull**: the EKS node IAM role needs ECR read
-   (`ecr:GetAuthorizationToken`, `ecr:BatchGetImage`,
-   `ecr:GetDownloadUrlForLayer`) for
-   `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com`. With that on the node
-   role, no `imagePullSecret` is required on the pod. The image must already be
-   mirrored into ECR (`scripts/mirror-images.sh`).
-
-## Pushing the template
-
-From the repo root:
-
-```bash
-# First time: create the template.
-coder templates push claude-code \
-  --directory coder-templates/claude-code \
-  --variable namespace=coder-workspaces
-
-# Subsequent updates push a new version.
-coder templates push claude-code \
-  --directory coder-templates/claude-code
-```
-
-Override the image or namespace at push time if needed:
-
-```bash
-coder templates push claude-code \
-  --directory coder-templates/claude-code \
-  --variable namespace=coder-workspaces \
-  --variable workspace_image=430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/codercom/enterprise-base:ubuntu-noble-20260601
-```
-
-Template variables:
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `namespace` | `coder-workspaces` | namespace for workspace pods |
-| `workspace_image` | ECR-mirrored `enterprise-base` | workspace container image |
-| `use_kubeconfig` | `false` | use a host kubeconfig instead of in-cluster config |
-
-## Using it
-
-- **As a workspace**: create a workspace from the template, open VS Code /
-  terminal / code-server, and run `claude` in the workspace.
-- **As a Task**: create a Coder Task from this template and enter a prompt.
-  Coder injects the prompt via `data.coder_task.me.prompt`, the
-  `coder_ai_task` resource binds the Task UI to the Claude Code app, and the
-  agent reports status back to the Coder UI through AgentAPI.
-
-## Verification status
-
-| Item | Source | Status |
-|---|---|---|
-| claude-code 4.7.3 inputs (`enable_aibridge`, `workdir`, `ai_prompt`, `report_tasks`, `subdomain`) and `task_app_id` output | module `main.tf` / `README.md` at tag `release/coder/claude-code/v4.7.3` | verified |
-| `coder_ai_task.app_id` + `data.coder_task` (`enabled`, `prompt`) | `coder/terraform-provider-coder` docs; first shipped in provider **v2.13.0** | verified |
-| Workspace image tag | Docker Hub `codercom/enterprise-base` | verified (`ubuntu-noble-20260601`) |
-| `code-server` 1.3.1 | registry tag `release/coder/code-server/v1.3.1` | verified (latest is 1.5.0) |
-| Live AI Gateway routing / Bedrock model access | runtime cluster | NOT verified here (no live infra access; Bedrock Claude access gated per `STATUS.md`) |
+1. **Coder server** 2.34.0 with the AI Governance add-on and the AI Gateway
+   providers configured.
+2. **Wildcard access URL** (`CODER_WILDCARD_ACCESS_URL=*.usgov.coderdemo.io`) so
+   the subdomain apps (Claude Code web app, code-server) work.
+3. **Workspaces namespace** (`coder-workspaces`) exists and the Coder
+   provisioner has pods/PVC RBAC there.
+4. **Registry pull secret**: a `kubernetes.io/dockerconfigjson` Secret in
+   `coder-workspaces` with read access to
+   `registry.usgov.coderdemo.io/coderdemo/coder-templates`, passed via
+   `image_pull_secret`. (Not needed for template import.)

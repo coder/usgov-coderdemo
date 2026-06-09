@@ -1,31 +1,101 @@
 # =============================================================================
-# coder-templates CI: two demo jobs, both Istio-safe + air-gapped.
+# coder-templates CI: build UBI9 workspace images, then push a Coder template.
 # =============================================================================
-#   push-template         pushes a Coder template to the GovCloud Coder.
-#   build-workspace-image builds a custom workspace image with Kaniko and pushes
-#                         it to THIS project's GitLab Container Registry.
+# Modeled on the reference repo's two GitHub workflows
+# (build-images.yml + push-templates.yml), collapsed into one pipeline:
 #
-# Both run on the same gitlab-runner Kubernetes executor (non-meshed
-# `gitlab-runner` namespace); the executor is generic and each job picks its own
-# ECR-mirrored image. The coder CLI and Kaniko reach Coder and the GitLab
-# Container Registry over their EXTERNAL gateway URLs (mTLS terminates at the
-# Istio ingress gateway), so mesh-wide STRICT mTLS is satisfied with no
-# plaintext hop to a meshed Service.
+#   build-images   Kaniko builds ubi9-base-workspace then ubi9-node-workspace
+#                  (sequential; node FROM the just-pushed base) and pushes
+#                  :latest, :9.7, and :9.7-<short-sha> to THIS project's GitLab
+#                  Container Registry ($CI_REGISTRY_IMAGE).
+#   push-template  The coder CLI pushes the Coder template (template/) to the
+#                  GovCloud Coder and applies metadata.json (icon + display
+#                  name) via `coder templates edit`.
+#
+# Both jobs run on the gitlab-runner Kubernetes executor (non-meshed
+# `gitlab-runner` namespace) and reach the GitLab Container Registry and Coder
+# over their EXTERNAL gateway URLs, so mesh-wide STRICT mTLS is satisfied (the
+# Istio ingress gateway does mTLS to the backends). The gitlab-runner namespace
+# has internet egress, so Kaniko pulls the UBI base from
+# registry.access.redhat.com and dnf-installs directly.
+#
+# Job images (Kaniko, coder CLI) are ECR mirrors for speed/reliability; each
+# overrides its entrypoint (`entrypoint: [""]`) so the runner shell runs the
+# job script.
 
 stages:
-  - deploy
-  - build-image
+  - build-images
+  - push-template
 
 variables:
+  # UBI minor; matches the FROM pin in images/ubi9-base-workspace/Dockerfile.
+  UBI9_VERSION: "9.7"
+  # Coder target (GovCloud demo; NOT dev.coder.com).
   CODER_URL: "https://dev.usgov.coderdemo.io"
-  CODER_TEMPLATE_NAME: "claude-code-ci"
   CODER_ORG: "coder"
+  CODER_TEMPLATE_NAME: "claude-code-ci"
 
 # ----------------------------------------------------------------------------
-# Push a Coder template to the GovCloud Coder.
+# Build the UBI9 workspace images with Kaniko (rootless, unprivileged, no
+# docker-in-docker) and push them to this project's GitLab Container Registry.
+#
+# Auth is the built-in CI job token ($CI_REGISTRY_USER / $CI_REGISTRY_PASSWORD),
+# which can both pull and push inside this project's registry. The base image is
+# built first and pushed; the node image then builds FROM the just-pushed
+# immutable :9.7-<sha> base.
+# ----------------------------------------------------------------------------
+build-images:
+  stage: build-images
+  image:
+    name: 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/gcr/kaniko-project/executor:v1.24.0-debug
+    entrypoint: [""]
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  variables:
+    BASE_IMAGE: "${CI_REGISTRY_IMAGE}/ubi9-base-workspace"
+    NODE_IMAGE: "${CI_REGISTRY_IMAGE}/ubi9-node-workspace"
+    # Kaniko building the UBI9 images (dnf transactions, Node, clang) needs more
+    # headroom than the runner's modest defaults. The runner config allows these
+    # overrides (see deploy/gitlab-runner/values.yaml *_overwrite_max_allowed).
+    KUBERNETES_CPU_REQUEST: "1"
+    KUBERNETES_CPU_LIMIT: "3"
+    KUBERNETES_MEMORY_REQUEST: "2Gi"
+    KUBERNETES_MEMORY_LIMIT: "6Gi"
+  script:
+    # Kaniko docker auth for the GitLab CR using the CI job token.
+    - mkdir -p /kaniko/.docker
+    - |
+      AUTH=$(printf '%s:%s' "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" | base64 | tr -d '\n')
+      printf '{"auths":{"%s":{"auth":"%s"}}}' "$CI_REGISTRY" "$AUTH" > /kaniko/.docker/config.json
+    # 1) Base: ubi9-base-workspace (FROM registry.access.redhat.com/ubi9/ubi:9.7).
+    - /kaniko/executor
+        --context "${CI_PROJECT_DIR}/images/ubi9-base-workspace"
+        --dockerfile "${CI_PROJECT_DIR}/images/ubi9-base-workspace/Dockerfile"
+        --destination "${BASE_IMAGE}:latest"
+        --destination "${BASE_IMAGE}:${UBI9_VERSION}"
+        --destination "${BASE_IMAGE}:${UBI9_VERSION}-${CI_COMMIT_SHORT_SHA}"
+        --compressed-caching=false
+    # 2) Node: ubi9-node-workspace, FROM the immutable base tag just pushed.
+    - /kaniko/executor
+        --context "${CI_PROJECT_DIR}/images/ubi9-node-workspace"
+        --dockerfile "${CI_PROJECT_DIR}/images/ubi9-node-workspace/Dockerfile"
+        --build-arg "WORKSPACE_BASE=${BASE_IMAGE}:${UBI9_VERSION}-${CI_COMMIT_SHORT_SHA}"
+        --destination "${NODE_IMAGE}:latest"
+        --destination "${NODE_IMAGE}:${UBI9_VERSION}"
+        --destination "${NODE_IMAGE}:${UBI9_VERSION}-${CI_COMMIT_SHORT_SHA}"
+        --compressed-caching=false
+
+# ----------------------------------------------------------------------------
+# Push the Coder template to the GovCloud Coder and apply its metadata.
+#
+# The coder CLI authenticates with CODER_SESSION_TOKEN (a masked + protected
+# CI/CD variable) and talks to Coder over $CODER_URL (the Istio ingress
+# gateway). The template's image_registry variable is set to $CI_REGISTRY_IMAGE
+# so the workspace image resolves to the ubi9-node-workspace the build-images
+# stage just pushed.
 # ----------------------------------------------------------------------------
 push-template:
-  stage: deploy
+  stage: push-template
   image:
     name: 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/ghcr/coder/coder:v2.34.0
     entrypoint: [""]
@@ -33,41 +103,29 @@ push-template:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
   script:
     - coder version
+    # The coder CLI reads CODER_URL + CODER_SESSION_TOKEN from the environment
+    # (CODER_URL is set in variables above; CODER_SESSION_TOKEN is the masked +
+    # protected CI/CD variable), so no `coder login` (and no writable HOME) is
+    # required.
     - coder whoami
-    - coder templates push "$CODER_TEMPLATE_NAME" --directory ./template --yes --org "$CODER_ORG"
-    - coder templates versions list "$CODER_TEMPLATE_NAME" --org "$CODER_ORG"
-
-# ----------------------------------------------------------------------------
-# Build a custom workspace image with Kaniko (rootless, unprivileged, no
-# docker-in-docker) and push it to the project's GitLab Container Registry.
-#
-# Air gap: the Kaniko image is an ECR mirror, and the Dockerfile builds FROM the
-# project's own GitLab CR copy of the base (pre-seeded from ECR by
-# scripts/setup-gitlab-ci-runners.py), so only the built-in CI job token is
-# needed and nothing is pulled from the internet.
-# ----------------------------------------------------------------------------
-build-workspace-image:
-  stage: build-image
-  image:
-    name: 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/gcr/kaniko-project/executor:v1.24.0-debug
-    entrypoint: [""]
-  rules:
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-  variables:
-    # Base lives in this project's registry (pre-seeded from the ECR mirror).
-    BASE_IMAGE: "${CI_REGISTRY_IMAGE}/workspace-base:bookworm-slim"
-    IMAGE_TAG: "${CI_REGISTRY_IMAGE}/custom-workspace"
-  script:
-    # Write the Kaniko docker auth for the GitLab CR using the CI job token.
-    # The job token can both pull the base and push the result in this project.
-    - mkdir -p /kaniko/.docker
+    - coder templates push "$CODER_TEMPLATE_NAME"
+        --directory ./template
+        --variable "namespace=coder-workspaces"
+        --variable "image_registry=${CI_REGISTRY_IMAGE}"
+        --org "$CODER_ORG"
+        --yes
+        --message "GitLab CI push from ${CI_COMMIT_SHORT_SHA}"
+    # Apply template metadata (icon + display name) post-push. The coder image
+    # has no jq, so parse metadata.json with sed (one field per line).
     - |
-      AUTH=$(printf '%s:%s' "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" | base64 | tr -d '\n')
-      printf '{"auths":{"%s":{"auth":"%s"}}}' "$CI_REGISTRY" "$AUTH" > /kaniko/.docker/config.json
-    - /kaniko/executor
-        --context "${CI_PROJECT_DIR}/image"
-        --dockerfile "${CI_PROJECT_DIR}/image/Dockerfile"
-        --build-arg "BASE_IMAGE=${BASE_IMAGE}"
-        --destination "${IMAGE_TAG}:${CI_COMMIT_SHORT_SHA}"
-        --destination "${IMAGE_TAG}:latest"
-        --use-new-run
+      if [ -f template/metadata.json ]; then
+        ICON=$(sed -n 's/.*"icon"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' template/metadata.json)
+        DISPLAY=$(sed -n 's/.*"display_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' template/metadata.json)
+        EDIT_ARGS=""
+        [ -n "$ICON" ] && EDIT_ARGS="$EDIT_ARGS --icon $ICON"
+        [ -n "$DISPLAY" ] && EDIT_ARGS="$EDIT_ARGS --display-name \"$DISPLAY\""
+        if [ -n "$EDIT_ARGS" ]; then
+          eval coder templates edit "$CODER_TEMPLATE_NAME" --org "$CODER_ORG" $EDIT_ARGS --yes
+        fi
+      fi
+    - coder templates versions list "$CODER_TEMPLATE_NAME" --org "$CODER_ORG"

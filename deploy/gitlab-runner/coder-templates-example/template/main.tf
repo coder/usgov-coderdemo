@@ -1,34 +1,39 @@
 # =============================================================================
-# Claude Code on Coder Agents: GovCloud demo workspace template
+# Claude Code on Coder Agents: GovCloud demo workspace template (CI / UBI9)
 # =============================================================================
-# Runs Claude Code as a Coder Agent inside a Kubernetes pod on the EKS
-# cluster. Claude Code is wired through the Coder AI Gateway (AI Bridge)
-# so the workspace never holds a raw Anthropic key: requests are proxied
-# through Coder using the workspace owner's session token and routed to
-# the configured provider (Anthropic-direct primary / Bedrock secondary)
-# in-boundary.
+# Runs Claude Code as a Coder Agent inside a Kubernetes pod on the EKS cluster.
+# Claude Code is wired through the Coder AI Gateway (AI Bridge) so the workspace
+# never holds a raw Anthropic key: requests are proxied through Coder using the
+# workspace owner's session token and routed to the configured provider
+# (Anthropic-direct primary / Bedrock secondary) in-boundary.
 #
-# Launching this template as a Coder Task surfaces the Claude Code chat UI
-# (via the bundled AgentAPI app) and seeds the agent with the task prompt.
+# Launching this template as a Coder Task surfaces the Claude Code chat UI (via
+# the bundled AgentAPI app) and seeds the agent with the task prompt.
+#
+# WORKSPACE IMAGE. This template consumes the UBI9 node image built and pushed
+# by this project's GitLab CI pipeline (Kaniko -> the project's GitLab Container
+# Registry). The push-template CI job passes
+# `--variable image_registry=$CI_REGISTRY_IMAGE`, so workspace_image resolves to
+# registry.usgov.coderdemo.io/coderdemo/coder-templates/ubi9-node-workspace:latest.
+# The image runs as uid 1001 (user "coder") with /home/coder owned by group 0
+# and group-writable, so the pod securityContext below uses run_as_user=1001,
+# run_as_group=0, fs_group=0 to land on that group-0 home.
 #
 # VERSION / INPUT NAMING. Verified against the Coder registry:
-#   - claude-code module is pinned to 4.7.3 (the version in
-#     deploy/CONVENTIONS.md / versions.lock.yaml).
+#   - claude-code module is pinned to 4.7.3.
 #   - In 4.7.3 the AI Gateway input is named `enable_aibridge` (NOT
-#     `enable_ai_gateway`). The `enable_ai_gateway` rename landed in the
-#     5.x line, which also REMOVED the bundled AgentAPI integration and
-#     the `task_app_id` output that `coder_ai_task` depends on. Staying on
-#     4.7.3 is what makes the Coder Tasks wiring below possible.
+#     `enable_ai_gateway`). The `enable_ai_gateway` rename landed in the 5.x
+#     line, which also REMOVED the bundled AgentAPI integration and the
+#     `task_app_id` output that `coder_ai_task` depends on. Staying on 4.7.3 is
+#     what makes the Coder Tasks wiring below possible.
 #   - `enable_aibridge = true` makes the module set, on the agent:
 #       ANTHROPIC_BASE_URL = <access_url>/api/v2/aibridge/anthropic
 #       CLAUDE_API_KEY     = <workspace owner session token>
-#     With CODER_ACCESS_URL=https://dev.usgov.coderdemo.io the base URL
-#     resolves to https://dev.usgov.coderdemo.io/api/v2/aibridge/anthropic.
-#   - We additionally export ANTHROPIC_AUTH_TOKEN (session token) to match
-#     the AI Gateway client contract in deploy/CONVENTIONS.md.
+#   - We additionally export ANTHROPIC_AUTH_TOKEN (session token) to match the
+#     AI Gateway client contract in deploy/CONVENTIONS.md.
 #
-# See README.md for the end-to-end AI Gateway wiring and cluster
-# prerequisites (namespace + provisioner RBAC).
+# See README.md for the end-to-end AI Gateway wiring and cluster prerequisites
+# (namespace + provisioner RBAC + registry pull secret).
 # =============================================================================
 
 terraform {
@@ -63,21 +68,27 @@ variable "namespace" {
   default     = "coder-workspaces"
 }
 
-# Workspace container image (ECR mirror).
-#
-# Upstream ref : docker.io/codercom/enterprise-base:ubuntu-noble-20260601
-# ECR mirror   : per deploy/CONVENTIONS.md the docker.io -> ECR mapping is
-#                docker.io/<repo>:<tag> -> <registry>/docker-hub/<repo>:<tag>
-#
-# codercom/enterprise-base is Coder's maintained Kubernetes workspace base
-# image: runs as user `coder` (uid 1000), ships git/curl/sudo, and is the
-# canonical base for Coder's official Kubernetes template. Claude Code and
-# AgentAPI install as standalone binaries into $HOME/.local/bin, so no
-# Node.js/npm is required in the base image.
-variable "workspace_image" {
+# Container registry that hosts the CI-built workspace images. The push-template
+# CI job overrides this with $CI_REGISTRY_IMAGE so it resolves to
+# registry.usgov.coderdemo.io/coderdemo/coder-templates. The workspace image is
+# always "<image_registry>/ubi9-node-workspace:latest", the image the
+# build-images CI job (Kaniko) pushes.
+variable "image_registry" {
   type        = string
-  description = "Fully-qualified workspace image. Defaults to the ECR-mirrored codercom/enterprise-base."
-  default     = "430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/codercom/enterprise-base:ubuntu-noble-20260601"
+  description = "Container registry path that hosts the CI-built workspace images (ubi9-node-workspace). Overridden at push time with $CI_REGISTRY_IMAGE."
+  default     = "registry.usgov.coderdemo.io/coderdemo/coder-templates"
+}
+
+# Optional imagePullSecret for the workspace pod. The project's GitLab Container
+# Registry is private, so a real workspace boot needs a docker-registry pull
+# secret in var.namespace. Template import (terraform plan) does not pull the
+# image, so this can stay empty for import/verification. Set it to the name of a
+# kubernetes.io/dockerconfigjson Secret in var.namespace to enable workspace
+# boots.
+variable "image_pull_secret" {
+  type        = string
+  description = "Name of a docker-registry pull Secret in var.namespace for the private GitLab Container Registry. Empty disables the imagePullSecret (import-only)."
+  default     = ""
 }
 
 provider "kubernetes" {
@@ -88,8 +99,8 @@ data "coder_provisioner" "me" {}
 data "coder_workspace" "me" {}
 data "coder_workspace_owner" "me" {}
 
-# Populated when the workspace is created as a Coder Task. `enabled` is
-# false for a normal workspace build, and `prompt` carries the task prompt.
+# Populated when the workspace is created as a Coder Task. `enabled` is false
+# for a normal workspace build, and `prompt` carries the task prompt.
 data "coder_task" "me" {}
 
 # -----------------------------------------------------------------------------
@@ -99,15 +110,25 @@ data "coder_task" "me" {}
 # Coder's external-auth provider `gitlab` (configured on the Coder server, see
 # deploy/coder/values.yaml CODER_EXTERNAL_AUTH_0_*). Declaring this data source
 # makes the workspace REQUIRE a GitLab login: the dashboard surfaces a "Login
-# with GitLab" control and the agent only reports the auth as satisfied once
-# the owner has completed the OAuth flow. The Coder agent's git credential
-# helper then injects the short-lived OAuth token for any clone/fetch/push to
+# with GitLab" control and the agent only reports the auth as satisfied once the
+# owner has completed the OAuth flow. The Coder agent's git credential helper
+# then injects the short-lived OAuth token for any clone/fetch/push to
 # gitlab.usgov.coderdemo.io. No PATs or SSH keys live in the workspace, and no
 # auth path leaves the GovCloud boundary.
 #
 # id MUST match CODER_EXTERNAL_AUTH_0_ID on the Coder server ("gitlab").
 data "coder_external_auth" "gitlab" {
   id = "gitlab"
+}
+
+# -----------------------------------------------------------------------------
+# Locals
+# -----------------------------------------------------------------------------
+
+locals {
+  # The CI-built UBI9 node image. The build-images CI job pushes
+  # "<image_registry>/ubi9-node-workspace:latest".
+  workspace_image = "${var.image_registry}/ubi9-node-workspace:latest"
 }
 
 # -----------------------------------------------------------------------------
@@ -183,8 +204,8 @@ data "coder_parameter" "disk_size" {
   }
 }
 
-# Fallback prompt for non-Task workspace builds. When the workspace is
-# launched as a Coder Task, data.coder_task.me.prompt takes precedence.
+# Fallback prompt for non-Task workspace builds. When the workspace is launched
+# as a Coder Task, data.coder_task.me.prompt takes precedence.
 data "coder_parameter" "ai_prompt" {
   name         = "ai_prompt"
   display_name = "Initial AI Prompt"
@@ -199,8 +220,8 @@ locals {
   # Prefer the Coder Task prompt; fall back to the parameter for plain builds.
   effective_prompt = data.coder_task.me.prompt != "" ? data.coder_task.me.prompt : data.coder_parameter.ai_prompt.value
 
-  # For documentation/readme parity. The claude-code module derives the
-  # same value internally from data.coder_workspace.me.access_url.
+  # For documentation/readme parity. The claude-code module derives the same
+  # value internally from data.coder_workspace.me.access_url.
   ai_gateway_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/aibridge/anthropic"
 }
 
@@ -213,8 +234,8 @@ resource "coder_agent" "main" {
   os   = "linux"
 
   # Claude Code + AgentAPI are installed by the claude-code module's own
-  # coder_script (native binaries into $HOME/.local/bin). This startup
-  # script only normalizes PATH and signals readiness.
+  # coder_script (native binaries into $HOME/.local/bin). This startup script
+  # only normalizes PATH and signals readiness.
   startup_script = <<-EOT
     #!/bin/bash
     set -e
@@ -228,8 +249,8 @@ resource "coder_agent" "main" {
     EDITOR = "code"
     VISUAL = "code"
 
-    # No docker socket in the pod; opt out of devcontainer auto-detection
-    # so the dashboard does not hang polling `docker ps`.
+    # No docker socket in the pod; opt out of devcontainer auto-detection so the
+    # dashboard does not hang polling `docker ps`.
     CODER_AGENT_DEVCONTAINERS_ENABLE = "false"
   }
 
@@ -269,12 +290,12 @@ resource "coder_agent" "main" {
 # -----------------------------------------------------------------------------
 # AI Gateway client auth
 # -----------------------------------------------------------------------------
-# The claude-code module (enable_aibridge = true) already sets
-# ANTHROPIC_BASE_URL and CLAUDE_API_KEY. We additionally export
-# ANTHROPIC_AUTH_TOKEN with the workspace owner's session token to match
-# the AI Gateway client contract documented in deploy/CONVENTIONS.md. Both
-# carry the same session token, so there is no conflict; no raw Anthropic
-# API key is ever placed in the workspace.
+# The claude-code module (enable_aibridge = true) already sets ANTHROPIC_BASE_URL
+# and CLAUDE_API_KEY. We additionally export ANTHROPIC_AUTH_TOKEN with the
+# workspace owner's session token to match the AI Gateway client contract
+# documented in deploy/CONVENTIONS.md. Both carry the same session token, so
+# there is no conflict; no raw Anthropic API key is ever placed in the
+# workspace.
 resource "coder_env" "anthropic_auth_token" {
   agent_id = coder_agent.main.id
   name     = "ANTHROPIC_AUTH_TOKEN"
@@ -294,10 +315,10 @@ module "claude_code" {
   # trust-accepted by the module.
   workdir = "/home/coder"
 
-  # Route Claude Code through the Coder AI Gateway (AI Bridge) instead of
-  # talking to api.anthropic.com directly. Sets ANTHROPIC_BASE_URL +
-  # CLAUDE_API_KEY (session token) on the agent. Mutually exclusive with
-  # claude_api_key / claude_code_oauth_token.
+  # Route Claude Code through the Coder AI Gateway (AI Bridge) instead of talking
+  # to api.anthropic.com directly. Sets ANTHROPIC_BASE_URL + CLAUDE_API_KEY
+  # (session token) on the agent. Mutually exclusive with claude_api_key /
+  # claude_code_oauth_token.
   enable_aibridge = true
 
   # Coder Tasks: seed the agent and report task status to the Coder UI via
@@ -305,12 +326,12 @@ module "claude_code" {
   ai_prompt    = local.effective_prompt
   report_tasks = true
 
-  # Serve the Claude Code web app on a subdomain. Requires the wildcard
-  # access URL (*.usgov.coderdemo.io) configured on the Coder server.
+  # Serve the Claude Code web app on a subdomain. Requires the wildcard access
+  # URL (*.usgov.coderdemo.io) configured on the Coder server.
   subdomain = true
 
-  # Model selection is intentionally left at the module default. With the
-  # AI Gateway, the requested model name must match the active provider:
+  # Model selection is intentionally left at the module default. With the AI
+  # Gateway, the requested model name must match the active provider:
   #   - Anthropic-direct (primary): an Anthropic model id, e.g.
   #     "claude-sonnet-4-5-20250929".
   #   - Bedrock (secondary): the GovCloud inference profile, e.g.
@@ -320,8 +341,8 @@ module "claude_code" {
 }
 
 # Marks this workspace build as a Coder AI Task and binds the Task UI to the
-# Claude Code AgentAPI app. Only created in a Task context so normal
-# workspace builds are unaffected.
+# Claude Code AgentAPI app. Only created in a Task context so normal workspace
+# builds are unaffected.
 resource "coder_ai_task" "claude_code" {
   count  = data.coder_task.me.enabled ? data.coder_workspace.me.start_count : 0
   app_id = module.claude_code.task_app_id
@@ -381,25 +402,43 @@ resource "kubernetes_pod_v1" "workspace" {
   }
 
   spec {
-    # enterprise-base runs as the `coder` user (uid/gid 1000).
+    # The UBI9 node image runs as uid 1001 (user "coder") with /home/coder owned
+    # by group 0 and group-writable (chgrp 0 + chmod g=u in the Dockerfile).
+    # run_as_group=0 + fs_group=0 land the process and the mounted PVC on group
+    # 0, so the agent and /home/coder are writable on EKS, mirroring the
+    # group-0 home pattern the image is built around.
     security_context {
-      run_as_user = 1000
-      fs_group    = 1000
+      run_as_user  = 1001
+      run_as_group = 0
+      fs_group     = 0
+    }
+
+    # Pull the private GitLab Container Registry image when a pull secret is
+    # provided. Empty var.image_pull_secret (the import/verification default)
+    # omits the block entirely.
+    dynamic "image_pull_secrets" {
+      for_each = var.image_pull_secret != "" ? [var.image_pull_secret] : []
+      content {
+        name = image_pull_secrets.value
+      }
     }
 
     container {
       name              = "dev"
-      image             = var.workspace_image
-      image_pull_policy = "IfNotPresent"
-      command           = ["sh", "-c", coder_agent.main.init_script]
+      image             = local.workspace_image
+      image_pull_policy = "Always"
+      # uid_entrypoint normalizes HOME/USER (and adds a passwd entry for an
+      # unexpected UID) before running the Coder agent init script.
+      command = ["/usr/local/bin/uid_entrypoint", "sh", "-c", coder_agent.main.init_script]
 
       security_context {
-        run_as_user                = 1000
-        # enterprise-base grants the coder user passwordless sudo. The
-        # claude-code/agentapi module installs the agentapi binary to
-        # /usr/local/bin via sudo, which requires privilege escalation.
-        # Disabling it sets the kernel no_new_privs flag and breaks that
-        # install (and the Coder Tasks chat UI it powers).
+        run_as_user  = 1001
+        run_as_group = 0
+        # The UBI9 image grants the coder user passwordless sudo. The
+        # claude-code/agentapi module installs the agentapi binary via sudo,
+        # which requires privilege escalation. Disabling it sets the kernel
+        # no_new_privs flag and breaks that install (and the Coder Tasks chat UI
+        # it powers).
         allow_privilege_escalation = true
       }
 
@@ -457,8 +496,8 @@ resource "kubernetes_pod_v1" "workspace" {
     }
   }
 
-  # The agent token is baked into init_script; ignore_changes keeps a
-  # running pod intact across template re-applies / prebuild claims.
+  # The agent token is baked into init_script; ignore_changes keeps a running
+  # pod intact across template re-applies / prebuild claims.
   lifecycle {
     ignore_changes = all
   }
