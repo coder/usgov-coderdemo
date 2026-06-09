@@ -109,18 +109,18 @@ BASE=https://dev.usgov.coderdemo.io
 # Inspect global config + all overrides
 curl -s "$BASE/api/experimental/chats/usage-limits" -H "$H"
 
-# Master switch ON: global default $100/month
+# Master switch ON: global default $500/month
 curl -s -X PUT "$BASE/api/experimental/chats/usage-limits" -H "$H" \
   -H 'Content-Type: application/json' \
-  -d '{"spend_limit_micros":100000000,"period":"month"}'
+  -d '{"spend_limit_micros":500000000,"period":"month"}'
 
-# Group override (org-wide via an Everyone group): $25
+# Group override (org-wide via the bravo Everyone group): $250
 curl -s -X PUT "$BASE/api/experimental/chats/usage-limits/group-overrides/4565f1c6-f1de-4e20-bb7e-a171e1046a59" \
-  -H "$H" -H 'Content-Type: application/json' -d '{"spend_limit_micros":25000000}'
+  -H "$H" -H 'Content-Type: application/json' -d '{"spend_limit_micros":250000000}'
 
-# User override: $5
+# User override (patrickplatform): $50
 curl -s -X PUT "$BASE/api/experimental/chats/usage-limits/overrides/289f3ef0-d69a-45ac-b96b-93366543e513" \
-  -H "$H" -H 'Content-Type: application/json' -d '{"spend_limit_micros":5000000}'
+  -H "$H" -H 'Content-Type: application/json' -d '{"spend_limit_micros":50000000}'
 
 # Read any user's effective limit (admin, no impersonation)
 curl -s "$BASE/api/experimental/chats/cost/289f3ef0-d69a-45ac-b96b-93366543e513/summary" -H "$H" \
@@ -131,30 +131,30 @@ curl -s -X PUT "$BASE/api/experimental/chats/usage-limits" -H "$H" \
   -H 'Content-Type: application/json' -d '{"spend_limit_micros":null,"period":"month"}'
 ```
 
-## Demo tiers applied (placeholders; tune in the script)
+## Demo tiers applied (current live values)
 
 | Tier                          | Scope                         | Limit  |
 |-------------------------------|-------------------------------|--------|
-| Global default (master ON)    | everyone (baseline)           | $100 / month |
-| Group: alpha / developers     | `0783bd37-...d62d9c`          | $10    |
-| Group: bravo / Everyone       | `4565f1c6-...e1046a59` (org-wide) | $25 |
-| User: patrickplatform         | `289f3ef0-...6543e513`        | $5     |
+| Global default (master ON)    | everyone (baseline)           | $500 / month |
+| Group: alpha / developers     | `0783bd37-...d62d9c`          | $100   |
+| Group: bravo / Everyone       | `4565f1c6-...e1046a59` (org-wide) | $250 |
+| User: patrickplatform         | `289f3ef0-...6543e513`        | $50    |
 
 ### Resolved effective limits (verified live)
 
 | User            | Effective | Why                                            |
 |-----------------|-----------|------------------------------------------------|
-| patrickplatform | $5        | user override wins over all groups             |
-| danadev         | $10       | only in alpha/developers ($10)                 |
-| austenplatform  | $25       | bravo org member -> bravo Everyone ($25)       |
-| admin           | $25       | bravo org member -> bravo Everyone ($25)       |
+| patrickplatform | $50       | user override wins over all groups             |
+| danadev         | $100      | only in alpha/developers ($100)                |
+| austenplatform  | $250      | bravo org member -> bravo Everyone ($250)      |
+| admin           | $250      | bravo org member -> bravo Everyone ($250)      |
 
 `current_spend` is `$0` for all (historical messages are unpriced).
 
-**Caveat / deviation from a naive expectation:** the $100 default is **not**
+**Caveat / deviation from a naive expectation:** the $500 default is **not**
 visible on any of these sample users. `admin` and `austenplatform` are members
-of the **bravo** org, so they inherit the bravo **Everyone** override ($25); the
-bare $100 default only applies to a user who is in **neither** alpha/developers
+of the **bravo** org, so they inherit the bravo **Everyone** override ($250); the
+bare $500 default only applies to a user who is in **neither** alpha/developers
 **nor** any bravo org (for example, a user confined to the `coder` org). This is
 correct resolver behavior (MIN across all of a user's groups, globally), just a
 reminder that "Everyone" overrides reach every org member.

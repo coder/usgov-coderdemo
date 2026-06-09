@@ -71,7 +71,7 @@ Reference ECR images by the mirrored path. Report the upstream refs you used.
 
 ## AI path (Coder AI Gateway)
 
-Two providers configured; AI Governance Add-On license is present.
+Three providers configured (anthropic-direct, openai-direct, anthropic-bedrock); AI Governance Add-On license is present.
 
 1. **Anthropic-direct (PRIMARY for demo reliability)**: points at
    `api.anthropic.com`; egress leaves the VPC via the NAT gateway. API key
@@ -81,8 +81,12 @@ Two providers configured; AI Governance Add-On license is present.
    `eks.amazonaws.com/role-arn: arn:aws-us-gov:iam::430737322961:role/usgov-coderdemo-coder-bedrock`.
    Region `us-gov-west-1`; model
    `us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0`; Nova Pro
-   (`amazon.nova-pro-v1:0`) is the proven fallback. Claude access is still
-   gated, so Bedrock may be disabled at demo time but must be wired.
+   (`amazon.nova-pro-v1:0`) is the small/fast fallback. Bedrock is ENABLED
+   and verified live (HTTP 200) on Coder v2.34.1, which backports the SigV4
+   proxy-header fix (#26053).
+3. **OpenAI-direct**: points at `api.openai.com`; API key from a k8s Secret.
+   Reconciled via the AI Providers API (`scripts/reconcile-ai-providers.py`),
+   not the seeded Helm env.
 
 Verify exact env var / values schema against
 `https://coder.com/docs/ai-coder/ai-gateway` (provider env vars like

@@ -199,7 +199,7 @@ Mirrored repositories present live (`aws ecr describe-repositories`):
 
 | ECR repository | Upstream (pinned) | Used by |
 |---|---|---|
-| `ghcr/coder/coder` | `ghcr.io/coder/coder:v2.34.0` | Coder control plane |
+| `ghcr/coder/coder` | `ghcr.io/coder/coder:v2.34.1` | Coder control plane |
 | `quay/keycloak/keycloak` | `quay.io/keycloak/keycloak:26.6.3` | Keycloak |
 | `docker-hub/gitlab/gitlab-ce` | `docker.io/gitlab/gitlab-ce:19.0.1-ce.0` | GitLab |
 | `docker-hub/codercom/enterprise-base` | `docker.io/codercom/enterprise-base:ubuntu-noble-20260601` | Workspace base image |

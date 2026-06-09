@@ -49,3 +49,55 @@ its `docs/swarm/handoffs/WS-NN-handoff.md`; the orchestrator consolidates here.
   apply.
 - WS-24: see docs/swarm/handoffs/WS-24-handoff.md (upstream reference/observability@863d498)
 - WS-25: see docs/swarm/handoffs/WS-25-handoff.md
+
+## Follow-on wave decisions (2026-06-09)
+
+All entries below are committed and pushed on branch ws-2x/phase2 (DRAFT PR #38),
+applied live this session.
+
+### 2026-06-09: Coder control plane v2.34.0 -> v2.34.1
+- driver: Bedrock SigV4 proxy-header fix (backport #26053); v2.34.0 returned a
+  SigV4 403 for the anthropic-bedrock provider.
+- change: bumped the control plane to ghcr/coder/coder:v2.34.1 (live
+  v2.34.1+2e8d80a, coderd 2/2, 0 restarts) and rebuilt the two external
+  provisioner daemons (alpha/bravo) to v2.34.1.
+- decision: supersedes the Phase-1 versions.lock pin of Coder 2.34.0; v2.34.1 is
+  now authoritative for the demo.
+
+### 2026-06-09: enable the anthropic-bedrock AI Gateway provider
+- change: enabled anthropic-bedrock (GovCloud IRSA, us-gov-west-1, Sonnet 4.5)
+  alongside the already-enabled anthropic (direct) and openai (direct).
+- verification: Bedrock returns HTTP 200 for blocking, streaming, and
+  anthropic-beta requests (previously blocked by the v2.34.0 SigV4 403).
+
+### 2026-06-09: curate the Coder Agents model picker to 4 models
+- change: curated the picker to exactly 4 enabled models, each at reasoning
+  effort high with an estimated per-model cost (USD per 1M in/out): Opus 4.8
+  (Anthropic Direct) 15/75; Sonnet 4.6 (Anthropic Direct, DEFAULT) 3/15; GPT 5.5
+  (OpenAI Direct) 1.25/10; Sonnet 4.5 (GovCloud Bedrock) 3/15.
+- change: extended scripts/reconcile-ai-providers.py to manage model_config
+  (cost + effort).
+
+### 2026-06-09: register the datastore MCP, remove the gateway-injected MCP
+- change: registered a read-only datastore MCP server (deploy/datastore-mcp) via
+  the supported path POST /api/experimental/mcp/servers (slug datastore,
+  auth_type none, default_on, enabled).
+- decision: removed the deprecated gateway-injected MCP and the datastore
+  External Auth in favor of the supported MCP servers path.
+
+### 2026-06-09: drop the GitLab MCP (Linear CODAGT-570)
+- finding: GitLab CE 19.0.1 official /api/v4/mcp works standalone, but Coder
+  v2.34.1 cannot connect: GitLab returns 204 on notifications/initialized while
+  mark3labs/mcp-go accepts only 200/202, and the RFC 9728 resource-array breaks
+  oauth2 auto-DCR.
+- decision: drop the GitLab MCP; not worth a 204-to-202 shim.
+
+### 2026-06-09: configure Coder Agents chat spend-limits
+- change: configured live spend-limits: global default $500/month (master ON),
+  group alpha/developers $100, group bravo "Everyone" $250 (org-wide), user
+  patrickplatform $50. Precedence is user > MIN(group) > default; enforcement is
+  a hard HTTP 409.
+- artifacts: control script scripts/demo-chat-spend-limits.py; doc
+  docs/plans/chat-spend-limits.md.
+- decision: the AI Bridge /ai/budget path is non-functional scaffolding and is
+  not used.

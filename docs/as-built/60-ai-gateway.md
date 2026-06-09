@@ -1,9 +1,15 @@
 # 60. AI Gateway / AI Bridge (as-built)
 
 How the Coder AI Gateway (formerly "AI Bridge") is wired for the GovCloud demo:
-two providers, routing by provider name, the Bedrock IRSA credential chain, and
+three providers, routing by provider name, the Bedrock IRSA credential chain, and
 the verified end-to-end routing proof. The product is the AI Gateway; the API
 paths still use `/api/v2/aibridge/...` (`deploy/coder/README.md:80-82`).
+
+Two surfaces share these providers: the **in-workspace** AI Gateway path that
+Claude Code calls (`POST /api/v2/aibridge/<name>/v1/...`, this document and
+`70-workspace-templates.md`), and the **Coder Agents control-plane chat** model
+picker that reads the same enabled `ai_providers` rows
+(`65-coder-agents.md`).
 
 ## Verification method
 
@@ -16,7 +22,7 @@ from `STATUS.md` and the facts sheet, and the live providers/config it depends
 on were independently re-verified.
 
 Re-verified live this session (read-only): `GET /api/v2/buildinfo` reports
-`v2.34.0+3006da5`; the AI Governance dashboard ConfigMap
+`v2.34.1+2e8d80a`; the AI Governance dashboard ConfigMap
 `coder-dashboard-ai-governance` (ns `monitoring`) holds 42 panel entries (four
 row headers plus 38 data panels) and references datasource uids `prometheus`,
 `loki`, and `aibridge-postgres`; the `aibridge-postgres-datasource` ConfigMap is
@@ -46,8 +52,11 @@ var later makes `coderd` fail to start (the drift guard). Source:
 `deploy/coder/README.md:123-140`, `deploy/coder/values.yaml:13-16, 159-164`.
 See `30-coder-control-plane.md` for the Helm-side seed/drift detail.
 
-Verified live: `GET /api/v2/ai/providers` returns two providers (below). These
-match the seeded `ai.bridge.providers` array in `deployment/config`.
+Verified live: `GET /api/v2/ai/providers` returns three providers (below): the
+env-seeded `anthropic` and `anthropic-bedrock`, plus `openai`, which was added
+through the reconciler (`scripts/reconcile-ai-providers.py`) against the API and
+is not env-seeded. Source of truth for the desired provider and model state is
+`deploy/coder/ai-providers.yaml`.
 
 ### Provider `anthropic` (direct, primary)
 
@@ -78,13 +87,33 @@ real `sk-ant-...` key. Do this in the UI, not by editing the `coder-ai` k8s
 secret, because the provider config now lives in the database. Source:
 `STATUS.md:61-74`, facts sheet "Remaining action".
 
-### Provider `anthropic-bedrock` (Bedrock via IRSA, secondary)
+### Provider `openai` (direct, secondary)
+
+```json
+{
+  "type": "openai",
+  "name": "openai",
+  "display_name": "OpenAI (direct)",
+  "enabled": true,
+  "base_url": "https://api.openai.com/v1/",
+  "api_keys": [{ "masked": "..." }],
+  "settings": null
+}
+```
+
+Direct OpenAI provider added through the reconciler (not env-seeded); the
+aibridge route is `POST /api/v2/aibridge/openai/v1/chat/completions` and egress
+to `api.openai.com` leaves the VPC via the NAT gateway. The key is referenced by
+env var name in `deploy/coder/ai-providers.yaml` (`key_from_env: OPENAI_KEY`),
+never stored in the file. Verified live via `GET /api/v2/ai/providers`.
+
+### Provider `anthropic-bedrock` (Bedrock via IRSA, enabled and verified)
 
 ```json
 {
   "type": "bedrock",
   "name": "anthropic-bedrock",
-  "display_name": "anthropic-bedrock",
+  "display_name": "Anthropic on Bedrock (GovCloud, IRSA)",
   "enabled": true,
   "base_url": "",
   "api_keys": [],
@@ -101,12 +130,20 @@ In-boundary provider with no static key (`api_keys` is empty); it authenticates
 through IRSA. The primary model is the GovCloud Claude Sonnet 4.5 inference
 profile; the small fast model (the Haiku-class background model Claude Code
 uses) is `amazon.nova-pro-v1:0`. Source: `deploy/coder/values.yaml:188-205`,
-verified live via `GET /api/v2/ai/providers`.
+`deploy/coder/ai-providers.yaml`, verified live via `GET /api/v2/ai/providers`.
 
-Claude Sonnet 4.5 access on Bedrock is still gated; it needs an Anthropic
-agreement via the account paired with GovCloud. `amazon.nova-pro-v1:0` is the
-proven fallback that invokes in GovCloud today. Source: `STATUS.md:29-31`,
-`deploy/coder/README.md:165-169`.
+**Now enabled and verified on v2.34.1.** Claude Sonnet 4.5 is ACTIVE in
+`us-gov-west-1` (the `us-gov.` cross-region inference profile plus the
+underlying foundation-model), and the `usgov-coderdemo-coder-bedrock` IRSA role
+allowlists both. On v2.34.0 the provider was blocked by a SigV4 `403` ("signature
+does not match"): the AI Gateway egress signed requests that still carried
+inbound Istio/Envoy proxy headers (`x-forwarded-for`, `x-envoy-*`,
+`x-request-id`), so the canonical `SignedHeaders` never matched what Bedrock
+recomputed. The fix (coder/coder#26019, strip proxy headers before signing)
+shipped in v2.34.1 via backport #26053. Verified live (2026-06-08):
+`POST /api/v2/aibridge/anthropic-bedrock/v1/messages` returns HTTP 200 for the
+blocking, streaming (SSE), and `anthropic-beta` header paths Claude Code uses
+(the earlier `coder/aibridge#221` beta-header rejection no longer reproduces).
 
 ## Routing path and why the provider must be named `anthropic`
 
@@ -128,6 +165,18 @@ This is why the Anthropic-direct provider is named exactly `anthropic` and the
 Bedrock provider is named `anthropic-bedrock`. To route Claude Code to Bedrock,
 you either rename the Bedrock provider to `anthropic` or set the workspace model
 to a Bedrock id (`STATUS.md:76-79`).
+
+## Coder Agents control-plane model picker
+
+The same `ai_providers` rows also back the Coder Agents control-plane chat. Its
+model picker (`GET /api/experimental/chats/models`) is curated to exactly four
+enabled models, each with reasoning effort `high` and an estimated per-model
+cost: Opus 4.8 (Anthropic Direct), Sonnet 4.6 (Anthropic Direct, the default),
+GPT 5.5 (OpenAI Direct), and Sonnet 4.5 (GovCloud Bedrock). Unlike the
+in-workspace aibridge path (which Claude Code drives with a fixed
+`ANTHROPIC_BASE_URL`), the picker selects among providers and models per chat.
+The model presets, costs, and the spend-limit accounting they feed are detailed
+in `65-coder-agents.md`; source of truth `deploy/coder/ai-providers.yaml`.
 
 ## End-to-end request flow
 
@@ -204,10 +253,10 @@ A `200` requires a working upstream credential:
 
 - Anthropic-direct: paste a real `sk-ant-...` key into the `anthropic` provider
   at `/ai/settings`, then re-run the routing check. Source: `STATUS.md:63-74`.
-- Bedrock (in-boundary alternative): enable Claude Sonnet 4.5 model access in
-  the GovCloud console, then route Claude Code at the `anthropic-bedrock`
-  provider (rename it to `anthropic` or set the workspace model). Bedrock access
-  is still gated; Nova Pro is the proven fallback. Source: `STATUS.md:76-79`.
+- Bedrock (in-boundary alternative): the `anthropic-bedrock` provider is enabled
+  and verified on v2.34.1 (HTTP 200 via IRSA, no key). To route Claude Code to
+  it, rename the provider to `anthropic` or set the workspace model to its
+  Bedrock id. Source: `STATUS.md:76-79`, `deploy/coder/ai-providers.yaml`.
 
 ## AI Governance dashboard
 
@@ -228,7 +277,7 @@ data panels). Source: `deploy/observability/dashboards-ai-governance.yaml` and
 | Loki | `loki` | AI Gateway log stream (ns `coder`) and Agent Firewall log stream (ns `coder-workspaces`), plus their event-rate panels. |
 | AI Gateway DB (Postgres) | `aibridge-postgres` | Token, cost, interception, session, prompt, and tool drill-downs from the Coder database that Prometheus does not expose. |
 
-The Postgres datasource is new in this redesign. The deployed Coder (v2.34.0)
+The Postgres datasource is new in this redesign. The deployed Coder (v2.34.1)
 exposes only provider-health gauges for the AI Gateway to Prometheus, and the
 latest `coder/coder` adds no token, request, or cost metrics either, so the
 per-interception, per-session, token, and cost data lives only in the Coder
@@ -279,23 +328,26 @@ the database table names (`aibridge_*`, `boundary_*`) are unchanged.
 
 ### Sparse-data caveat
 
-The demo Anthropic key is a placeholder (see above), so AI calls fail before any
-tokens are metered and no real AI traffic is recorded. The token and cost stats,
-Tokens Over Time, Estimated Cost Over Time, Token Usage Detail, Recent User
-Prompts, Recent Tool Calls, and the Firewall Sessions panels therefore read `0`
-or stay empty by design; this is expected, not an error. Panels that already have
-data include provider health and inventory, total interceptions, active sessions,
-unique users, interceptions by provider / model / user, Recent Interceptions,
-Sessions, and the Agent Firewall log stream.
+The demo Anthropic direct key is a placeholder (see above), so direct-path calls
+fail before any tokens are metered. The `anthropic-bedrock` provider does respond
+(HTTP 200), so Bedrock calls record some token and cost data, but volume stays
+low because no sustained AI traffic is generated in the demo. The token and cost
+stats, Tokens Over Time, Estimated Cost Over Time, Token Usage Detail, Recent
+User Prompts, Recent Tool Calls, and the Firewall Sessions panels therefore read
+`0` or near-empty by design; this is expected, not an error. Panels that already
+have data include provider health and inventory, total interceptions, active
+sessions, unique users, interceptions by provider / model / user, Recent
+Interceptions, Sessions, and the Agent Firewall log stream.
 
 ## Known issues
 
-- **Bedrock model access gated.** `InvokeModel` on
-  `us-gov.anthropic.claude-sonnet-4-5-...` returns AccessDenied until model
-  access is enabled; the provider is wired but may be disabled at demo time.
-  Source: `deploy/coder/README.md:165-169`, `STATUS.md:29-31`.
-- **Claude Code Bedrock beta header in GovCloud.** Known issue
-  `coder/aibridge#221`: Claude Code sends an `anthropic-beta` flag that GovCloud
-  Bedrock rejects (`invalid beta flag`), which can break the
-  Bedrock-through-gateway path for Claude Code specifically. Anthropic-direct is
-  unaffected. Source: `deploy/coder/README.md:170-174`.
+- **Bedrock model access (resolved on v2.34.1).** `InvokeModel` on
+  `us-gov.anthropic.claude-sonnet-4-5-...` is ACTIVE in `us-gov-west-1` and the
+  provider is enabled and verified (HTTP 200). The earlier v2.34.0 SigV4 `403`
+  (proxy headers carried into signing) was fixed by coder/coder#26019, shipped
+  via backport #26053. Source: `deploy/coder/ai-providers.yaml`, `STATUS.md`.
+- **Claude Code Bedrock beta header (no longer reproduces on v2.34.1).** Known
+  issue `coder/aibridge#221`: Claude Code sends an `anthropic-beta` flag that
+  GovCloud Bedrock historically rejected. On v2.34.1 the blocking, streaming,
+  and `anthropic-beta` paths all return HTTP 200 through the gateway. Source:
+  `deploy/coder/ai-providers.yaml`, `deploy/coder/README.md:170-174`.

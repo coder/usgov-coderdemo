@@ -86,3 +86,8 @@ all three tools and returned the per-region report counts.
   seed reloads). That is intentional for a throwaway demo store.
 - The custom MCP image is built locally and pushed to ECR; it is not part of
   `scripts/images.txt` (that list is for upstream mirrors).
+- GitLab's official MCP server (GitLab CE 19.0.1) was evaluated as a second MCP
+  example and dropped (CODAGT-570): it works standalone, but Coder v2.34.1
+  cannot connect to it (a 204-vs-202 mismatch on `notifications/initialized` in
+  `mark3labs/mcp-go`, and an RFC 9728 resource-array response that breaks the
+  oauth2 auto-DCR path). This datastore MCP is the demo's working MCP example.

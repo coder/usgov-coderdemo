@@ -21,12 +21,12 @@ live result.
 - [as-built/10-infrastructure.md](as-built/10-infrastructure.md): AWS GovCloud substrate (VPC, EKS, RDS, ECR, Route53, ACM, NLB)
 - [as-built/20-platform-kubernetes.md](as-built/20-platform-kubernetes.md): Kubernetes platform layer (namespaces, ingress, StorageClass, RBAC)
 - [as-built/25-istio-service-mesh.md](as-built/25-istio-service-mesh.md): Istio service mesh edge + mesh-wide mTLS
-- [as-built/30-coder-control-plane.md](as-built/30-coder-control-plane.md): Coder v2.34.0 control plane + OIDC SSO
+- [as-built/30-coder-control-plane.md](as-built/30-coder-control-plane.md): Coder v2.34.1 control plane + OIDC SSO
 - [as-built/40-identity-keycloak.md](as-built/40-identity-keycloak.md): Keycloak realm `coder` + OIDC client
 - [as-built/45-idp-sync-personas.md](as-built/45-idp-sync-personas.md): IdP org/group/role sync + demo personas
 - [as-built/50-gitlab-scm.md](as-built/50-gitlab-scm.md): in-boundary GitLab SCM + CI runners + Container Registry
 - [as-built/55-observability.md](as-built/55-observability.md): in-cluster Prometheus + Grafana observability
-- [as-built/60-ai-gateway.md](as-built/60-ai-gateway.md): AI Gateway providers + name-based routing
+- [as-built/60-ai-gateway.md](as-built/60-ai-gateway.md): AI Gateway providers (anthropic, openai, anthropic-bedrock all enabled; Bedrock verified) + name-based routing + Coder Agents (4-model picker with cost/effort, datastore MCP, chat spend-limits)
 - [as-built/70-workspace-templates.md](as-built/70-workspace-templates.md): the `claude-code` workspace template
 - [as-built/80-iac-vs-imperative.md](as-built/80-iac-vs-imperative.md): declarative vs imperative ledger
 - [as-built/85-secrets-management.md](as-built/85-secrets-management.md): secrets via ESO + AWS Secrets Manager

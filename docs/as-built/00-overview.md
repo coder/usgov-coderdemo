@@ -8,9 +8,11 @@ deviations are called out inline.
 - Region / account: `us-gov-west-1`, account `430737322961`, partition
   `aws-us-gov`. Everything runs inside the GovCloud boundary.
 - Domain: `usgov.coderdemo.io`.
-- Coder version: `v2.34.0` (confirmed live via
-  `GET https://dev.usgov.coderdemo.io/api/v2/buildinfo` -> `v2.34.0+3006da5`),
-  licensed with the AI Governance add-on plus premium entitlements.
+- Coder version: `v2.34.1` (confirmed live via
+  `GET https://dev.usgov.coderdemo.io/api/v2/buildinfo` -> `v2.34.1+2e8d80a`),
+  licensed with the AI Governance add-on plus premium entitlements. v2.34.1 is a
+  patch over v2.34.0 that strips Istio/Envoy proxy headers before SigV4 signing,
+  fixing GovCloud Bedrock egress (backport #26053).
 
 ## What the demo proves
 
@@ -26,9 +28,10 @@ source-control, and AI path stays inside AWS GovCloud:
    external-auth provider so workspace git operations use short-lived
    in-boundary OAuth tokens (`deploy/gitlab/`, `deploy/coder/values.yaml`).
 4. **Coder AI Gateway (AI Bridge)** as the governed egress for model traffic,
-   fronting two providers: `anthropic` (direct to `api.anthropic.com` over the
-   NAT gateway) and `anthropic-bedrock` (Amazon Bedrock in-region via IRSA, no
-   static keys).
+   fronting three providers: `anthropic` (direct to `api.anthropic.com` over the
+   NAT gateway), `openai` (direct to `api.openai.com`), and `anthropic-bedrock`
+   (Amazon Bedrock in GovCloud via IRSA, no static keys; enabled and verified on
+   v2.34.1).
 5. **Coder Agents running Claude Code** in workspace pods, talking only to the
    AI Gateway with the owner's session token, never holding a raw model key
    (`coder-templates/claude-code/main.tf`).
@@ -60,14 +63,14 @@ the only model egress is the governed AI Gateway path.
 | Edge | Route53 zone `Z06701704WFETYIRU5C8` | AWS | Alias A records `dev` / `auth` / `gitlab` / `grafana` / `kiali` / `*` -> the Istio gateway NLB (`25-istio-service-mesh.md`). |
 | Mesh | Istio `1.30.1`, mesh-wide STRICT mTLS | ns `istio-system` | Sidecars injected in `coder`, `keycloak`, `gitlab`; `coder-workspaces` excluded (`25-istio-service-mesh.md`). |
 | Ingress (retained) | ingress-nginx (Helm chart `4.15.1`) + aws-load-balancer-controller | ns `ingress-nginx` | Out of the DNS path; kept running for per-host rollback. Decommission tracked in issue #34. |
-| Control plane | Coder `v2.34.0` (1 replica) | ns `coder` | OIDC SSO, AI Gateway, GitLab external auth, path apps disabled (`deploy/coder/values.yaml`). |
+| Control plane | Coder `v2.34.1` (1 replica) | ns `coder` | OIDC SSO, AI Gateway, GitLab external auth, path apps disabled (`deploy/coder/values.yaml`). |
 | Identity | Keycloak `26.6.3`, realm `coder` | ns `keycloak` | OIDC client `coder`; admin console `/admin` (`deploy/keycloak/`). |
 | SCM | GitLab CE `19.0.1-ce.0`, embedded Postgres | ns `gitlab` | Single-container Omnibus StatefulSet `gitlab-0` (`deploy/gitlab/`). |
 | CI / Registry | GitLab CI runner + GitLab Container Registry | ns `gitlab-runner`, ns `gitlab` | Non-meshed runner reaches GitLab/Coder over external URLs; registry served at `registry.usgov.coderdemo.io` via the Istio gateway to `gitlab.gitlab.svc:5050` (`deploy/gitlab-runner/`, `deploy/gitlab/virtualservice-registry.yaml`). |
 | Workspaces | Claude Code template pods | ns `coder-workspaces` | `enterprise-base` image, gp3 PVC, Claude Code + AgentAPI + code-server (`coder-templates/claude-code/main.tf`). |
 | Data | RDS PostgreSQL `18.4`, single instance | AWS | Databases `coder` and `keycloak`; `rds.force_ssl=1` (`deploy/CONVENTIONS.md`, `STATUS.md`). |
 | Registry | ECR `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com` | AWS | Mirrored images, no pull-through in GovCloud (`scripts/mirror-images.sh`). |
-| AI egress | AI Gateway -> `api.anthropic.com` via NAT; or Bedrock via IRSA | AWS | Provider `anthropic` (direct) and `anthropic-bedrock` (Bedrock). |
+| AI egress | AI Gateway -> `api.anthropic.com` / `api.openai.com` via NAT; or Bedrock via IRSA | AWS | Providers `anthropic` and `openai` (direct) and `anthropic-bedrock` (Bedrock, GovCloud). |
 
 EKS detail: cluster `usgov-coderdemo`, k8s `1.36`, standard EKS (Auto Mode was
 abandoned in this account), managed node group `mng` of 3x `m5.xlarge`
@@ -91,7 +94,7 @@ flowchart TB
 
     subgraph eks [EKS cluster usgov-coderdemo / k8s 1.36]
       igw[Istio ingress gateway<br/>ns istio-system]
-      coder[Coder control plane<br/>ns coder / v2.34.0]
+      coder[Coder control plane<br/>ns coder / v2.34.1]
       kc[Keycloak<br/>ns keycloak / realm coder]
       gl[GitLab CE<br/>ns gitlab / embedded Postgres]
       ws[Workspace pods<br/>ns coder-workspaces<br/>Claude Code agent]
@@ -199,16 +202,18 @@ ASCII summary for terminals:
    that provider's base URL `https://api.anthropic.com`. Egress leaves the VPC
    through the single NAT gateway (`deploy/coder/values.yaml`, facts sheet).
 4. The alternative provider `anthropic-bedrock` (type `bedrock`) calls Bedrock
-   in-region using the coder service account IRSA role
+   in GovCloud using the coder service account IRSA role
    `usgov-coderdemo-coder-bedrock` (no static key), model
    `us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0`, with small-fast model
    `amazon.nova-pro-v1:0` (`deploy/coder/values.yaml`).
 5. **Current state.** The `anthropic` provider holds a **placeholder** key, so
    routing is verified end to end but returns `502 "all configured keys failed
    authentication"`. The remaining action is to paste a real `sk-ant-...` key
-   into the `anthropic` provider at `/ai/settings` (UI, not the k8s secret).
-   Bedrock Claude Sonnet 4.5 access is still gated; `amazon.nova-pro-v1:0` is
-   the proven in-GovCloud fallback (`STATUS.md`, facts sheet).
+   into the `anthropic` provider at `/ai/settings` (UI, not the k8s secret). The
+   `anthropic-bedrock` provider (IRSA, no key) is now **enabled and verified**:
+   on v2.34.1 it returns HTTP 200 for the blocking, streaming, and
+   `anthropic-beta` paths (the v2.34.0 SigV4 403 was fixed by backport #26053).
+   See [`60-ai-gateway.md`](60-ai-gateway.md) and [`65-coder-agents.md`](65-coder-agents.md).
 
 ## Detailed companion documents
 
@@ -226,6 +231,7 @@ confirm exact names against the directory listing if a link does not resolve.
 | [`40-identity-keycloak.md`](40-identity-keycloak.md) | Keycloak realm `coder`, OIDC client, SSO config, identity gaps. |
 | [`50-gitlab-scm.md`](50-gitlab-scm.md) | In-boundary GitLab and the Coder git external-auth provider. |
 | `60-*.md` | AI Gateway / AI Bridge, DB-managed providers, Bedrock IRSA. |
+| [`65-coder-agents.md`](65-coder-agents.md) | Coder Agents control-plane chat: curated 4-model picker, datastore MCP server, chat spend-limits. |
 | `70-*.md` | `claude-code` workspace template, Coder Agents, Tasks, code-server. |
 | `80-*.md` | Additional layer (for example networking or security hardening); confirm topic in the directory. |
 | [`90-operations-runbook.md`](90-operations-runbook.md) | Day-2 operations: access, upgrades, template push, image mirroring, known gaps. |

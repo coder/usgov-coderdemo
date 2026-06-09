@@ -37,6 +37,16 @@
 | 24 | Upstream coder/observability dashboards | APPLIED (additive) | ws-2x/phase2 | New aibridge (uid ai-gateway, 33 panels) + boundary (uid agent-firewall, 16 panels) provisioned and verified; old combined ai-governance dashboard retained pending a delete decision |
 | 25 | Workspace template family + e2e acceptance | PUSHED + CONFIGURED (coder + alpha) | ws-2x/phase2 | All 5 imported (plan passed) with display-name/icon/routing-description in orgs coder and alpha; fixed platform-engineer heredoc bug and the 128-char description limit; build/C4 still needs a one-time GitLab OAuth (manual) |
 
+## Follow-on wave (2026-06-09, post WS-20..25)
+A follow-on wave landed on `ws-2x/phase2` (DRAFT PR #38): the Coder control plane
+bump v2.34.0 -> v2.34.1 (Bedrock SigV4 proxy-header fix, backport #26053;
+provisioners alpha/bravo rebuilt), enabling the anthropic-bedrock provider
+(verified HTTP 200), curating the Coder Agents model picker to 4 models (effort
+high + per-model cost), registering the read-only `datastore` MCP server (the
+gateway-injected MCP was removed), and configuring chat spend-limits (default
+$500/mo, alpha $100, bravo $250, user patrickplatform $50). GitLab MCP was
+dropped (CODAGT-570). All applied live and pushed.
+
 ## Connectivity / live checks done
 | Check | Status | Notes |
 |-------|--------|-------|
@@ -73,8 +83,9 @@
   claude-code, default-off) is staged for review.
 
 ## Active locks / warnings
-- versions.lock.yaml is authoritative (Coder 2.34.0, k8s 1.36, KC 26.6.3, GitLab
-  CE 19.0.1). Do not bump Coder.
+- versions.lock.yaml baseline (k8s 1.36, KC 26.6.3, GitLab CE 19.0.1). Coder was
+  bumped 2.34.0 -> 2.34.1 in the 2026-06-09 follow-on wave (Bedrock SigV4 fix);
+  v2.34.1 is now authoritative.
 - Do not regress Phase-1 hardening: CODER_DISABLE_PATH_APPS=true, UNCLASSIFIED
   banner, GitHub login disabled, GitLab-only external auth, Keycloak+local SSO.
 - decisions-locked.md is Phase-1 era; where it conflicts with the Phase-2

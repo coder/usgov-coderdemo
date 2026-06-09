@@ -2,7 +2,8 @@
 
 Helm values + Ingress for the Coder dashboard at `dev.usgov.coderdemo.io`,
 pinned to **Coder v2.34.1** (official chart, `ghcr.io/coder/coder:v2.34.1`
-mirrored to ECR). Read [`deploy/CONVENTIONS.md`](../CONVENTIONS.md) first.
+mirrored to ECR). v2.34.1 is pinned for the Bedrock SigV4 signing fix
+(#26053). Read [`deploy/CONVENTIONS.md`](../CONVENTIONS.md) first.
 
 ## Files
 
@@ -120,6 +121,17 @@ Notes:
   `ANTHROPIC_BASE_URL=<access-url>/api/v2/aibridge/anthropic` and
   `ANTHROPIC_AUTH_TOKEN=<coder session token>`.
 
+### Live provider and model state (reconciled via the API)
+
+Providers are reconciled through the AI Providers API from `ai-providers.yaml`,
+not through Helm. Three providers are enabled: `anthropic` (direct), `openai`
+(direct), and `anthropic-bedrock` (GovCloud IRSA, `us-gov-west-1`, Claude
+Sonnet 4.5), with Bedrock now enabled and verified 200 on v2.34.1. The Coder
+Agents model picker is curated to exactly four enabled models, each carrying a
+reasoning effort and an estimated cost: Opus 4.8 (Anthropic Direct), Sonnet 4.6
+(Anthropic Direct, default), GPT 5.5 (OpenAI Direct), and Sonnet 4.5 (GovCloud
+Bedrock).
+
 ### IMPORTANT: provider env vars seed the DB ONCE
 
 Since v2.34, AI Gateway providers live in the **database**, managed at
@@ -162,16 +174,22 @@ inaccessible / providers will not serve without the add-on entitlement.
    `<app>-db` with key `password` only. Reconcile with the platform layer:
    either it also publishes `url`, or add a small step to assemble the URL from
    `password` + `rds_endpoint`. (Documented in `secrets.example.yaml`.)
-2. **Bedrock model access still gated.** `InvokeModel` on
-   `us-gov.anthropic.claude-sonnet-4-5-...` returns AccessDenied until model
-   access is enabled (STATUS.md gating item). The Bedrock provider is wired but
-   may need to be disabled at demo time from `/ai/settings`; Nova Pro
-   (`amazon.nova-pro-v1:0`) is the proven fallback.
-3. **Claude Code + Bedrock beta header (GovCloud).** Known issue
-   `coder/aibridge#221`: Claude Code sends an `anthropic-beta` flag that Bedrock
-   in GovCloud rejects (`invalid beta flag`). This can break the
-   Bedrock-through-AI-Gateway path for Claude Code specifically; Anthropic-direct
-   (primary) is unaffected. Validate before relying on Bedrock for the live demo.
+2. **Bedrock enabled and verified.** Claude Sonnet 4.5 on the GovCloud
+   `us-gov.anthropic.claude-sonnet-4-5-...` cross-region inference profile is
+   active in `us-gov-west-1`, and the Bedrock provider is enabled. Verified
+   live on v2.34.1 (2026-06-08): `InvokeModel` via
+   `/api/v2/aibridge/anthropic-bedrock/v1/messages` returns 200 for the
+   blocking, streaming (SSE), and `anthropic-beta` header paths Claude Code
+   uses. Nova Pro (`amazon.nova-pro-v1:0`) remains the configured small/fast
+   fallback.
+3. **Bedrock SigV4 signing fix (resolved in v2.34.1).** On v2.34.0 the Bedrock
+   path failed with a SigV4 403 (`signature does not match`): the AI Gateway
+   signed egress requests that still carried inbound proxy headers
+   (`x-forwarded-for`, `x-envoy-*`, `x-request-id`), so the canonical
+   `SignedHeaders` never matched what Bedrock recomputed. Fixed upstream by
+   `coder/coder#26019` (strip proxy headers before signing), shipped in v2.34.1
+   via backport #26053. The earlier `coder/aibridge#221` `anthropic-beta`
+   rejection no longer reproduces on v2.34.1.
 4. **IRSA STS in GovCloud.** IRSA exchanges the SA token via
    `AssumeRoleWithWebIdentity`. `AWS_REGION` + `AWS_STS_REGIONAL_ENDPOINTS=regional`
    are set so the SDK uses the GovCloud regional STS endpoint; verify the role

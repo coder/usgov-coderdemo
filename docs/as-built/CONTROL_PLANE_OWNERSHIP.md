@@ -33,7 +33,9 @@ including known drift; the convergence path is in
 | Secret values | ASM `usgov-coderdemo/*` | bootstrap + `scripts/migrate-secrets-to-asm.py` + per-secret reconcilers | values not in git (by design) | parallel copy in `generated-secrets.env` |
 | k8s Secret objects | ASM via ESO | `deploy/platform/external-secrets/*` + per-app ExternalSecrets | yes (CRDs) | clean (verify-drift checks fingerprints) |
 | coderd server config | `deploy/coder/values.yaml` | Helm, applied via CLI | yes | applied by hand, no reconciler |
-| AI Gateway providers + models | Coder DB; desired state `deploy/coder/ai-providers.yaml` | `scripts/reconcile-ai-providers.py` (API). `values.yaml` env is a FROZEN one-time seed | yes (desired) | DB authoritative; reconcile to converge |
+| AI Gateway providers + models | Coder DB; desired state `deploy/coder/ai-providers.yaml` | `scripts/reconcile-ai-providers.py` (API, sends/diffs `model_config`). `values.yaml` env is a FROZEN one-time seed | yes (desired) | DB authoritative; reconcile to converge |
+| Coder Agents MCP servers | Coder DB | `POST /api/experimental/mcp/servers` (supported path); `deploy/datastore-mcp/` for the server | partial (server in git) | DB-only registration; gateway-injected MCP removed |
+| Coder Agents chat spend-limits | Coder DB | `scripts/demo-chat-spend-limits.py` (API `/api/experimental/chats/usage-limits`) | script only | DB-only effect |
 | Coder templates | `coder templates push` | CLI; HCL in `coder-templates/` and `deploy/gitlab-runner/.../template` | partial | pushes/edits imperative |
 | Coder runtime settings (banner, owner, idpsync, license) | Coder DB | `scripts/set-appearance.sh`, `grant-coder-owner.py`, `setup-coder-idp-sync.py` | script only | DB-only effect |
 | GitLab project + CI vars + runner | GitLab DB | `scripts/setup-gitlab-ci-runners.py` (gitlab-rails + API); runner via Helm `deploy/gitlab-runner` | partial | users/CI/webhooks live-only |
@@ -61,12 +63,32 @@ including known drift; the convergence path is in
 
 ## AI Gateway specifics
 
-- Enabled providers: `anthropic` (direct, primary, demo default) and `openai`
-  (direct). Both serve via aibridge and the Coder Agents model picker.
-- `anthropic-bedrock` (GovCloud, IRSA) is DISABLED. Access and IAM are ready
-  (Sonnet 4.5 foundation-model and us-gov. inference profile ACTIVE; IRSA role
-  allowlists both), but coder v2.34.0 aibridge fails SigV4 signing to GovCloud
-  Bedrock (403 signature mismatch; it under-encodes the colon in the model id
-  on the canonical path). Re-enable by flipping `enabled` in
-  `ai-providers.yaml` and re-running the reconciler once the upstream signing
-  bug (and the anthropic-beta header rejection, coder/aibridge#221) are fixed.
+- Enabled providers (verified live `GET /api/v2/ai/providers`): `anthropic`
+  (direct, primary, demo default), `openai` (direct), and `anthropic-bedrock`
+  (GovCloud, IRSA). All three serve via aibridge and back the Coder Agents
+  model picker.
+- `anthropic-bedrock` is now ENABLED and verified on v2.34.1 (HTTP 200 for the
+  blocking, streaming, and anthropic-beta paths). It was disabled on v2.34.0 by
+  a SigV4 403: the aibridge egress signed requests that still carried inbound
+  Istio/Envoy proxy headers, so the canonical SignedHeaders never matched what
+  Bedrock recomputed. Fixed by coder/coder#26019 (strip proxy headers before
+  signing), shipped via backport #26053. Sonnet 4.5 foundation-model and the
+  us-gov. inference profile are ACTIVE and the IRSA role allowlists both.
+- Reconcile providers and model presets from `deploy/coder/ai-providers.yaml`
+  with `scripts/reconcile-ai-providers.py` (sends/diffs `model_config`: cost
+  plus provider_options reasoning effort).
+
+## Coder Agents specifics
+
+- Model picker: 4 enabled models (Opus 4.8 Direct; Sonnet 4.6 Direct, default;
+  GPT 5.5 Direct; Sonnet 4.5 GovCloud Bedrock), each reasoning effort high with
+  an estimated cost. Source of truth `deploy/coder/ai-providers.yaml`; managed
+  via `/api/experimental/chats/model-configs`. See
+  `docs/as-built/65-coder-agents.md`.
+- Datastore MCP: read-only `datastore` server registered via the supported path
+  (`POST /api/experimental/mcp/servers`; `deploy/datastore-mcp/`). The
+  deprecated gateway-injected MCP was removed from `values.yaml`. GitLab MCP
+  evaluated and dropped (CODAGT-570).
+- Chat spend-limits: global default plus group/user overrides via
+  `scripts/demo-chat-spend-limits.py`; hard HTTP 409 at or over the limit;
+  design in `docs/plans/chat-spend-limits.md`.
