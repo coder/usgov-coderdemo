@@ -17,7 +17,7 @@ CREATE TABLE regions (
 CREATE TABLE entities (
     id         serial PRIMARY KEY,
     name       text NOT NULL,
-    -- kind is one of: organization, infrastructure, program.
+-- kind is one of: organization, infrastructure, program.
     kind       text NOT NULL,
     region     text NOT NULL,
     first_seen date NOT NULL,
@@ -28,12 +28,12 @@ CREATE TABLE reports (
     id          serial PRIMARY KEY,
     report_date date NOT NULL,
     region      text NOT NULL,
-    -- topic is one of: logistics, infrastructure, public-health, weather,
-    -- supply-chain, economic.
+-- topic is one of: logistics, infrastructure, public-health, weather,
+-- supply-chain, economic.
     topic       text NOT NULL,
-    -- source_type is one of: open-source, press, sensor, partner.
+-- source_type is one of: open-source, press, sensor, partner.
     source_type text NOT NULL,
-    -- confidence is one of: low, moderate, high.
+-- confidence is one of: low, moderate, high.
     confidence  text NOT NULL,
     title       text NOT NULL,
     summary     text NOT NULL
