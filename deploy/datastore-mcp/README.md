@@ -51,6 +51,38 @@ the `coder-external-auth` Secret, keeping ASM the single source of truth.
 
 ## Using it in the demo
 
+The data-store MCP is available on three surfaces, all governed/attributed:
+
+### A. Coder Agents (control-plane chat) via the "MCP Servers" admin page
+
+Registered as an `auth_type: none`, `streamable_http` server that coderd
+reaches in-cluster (no per-user OAuth needed). Reproduce the live object
+(Admin Settings -> MCP Servers, or API):
+
+```sh
+curl -X POST "$CODER_URL/api/experimental/mcp/servers" \
+  -H "Coder-Session-Token: $TOKEN" -H "Content-Type: application/json" \
+  --data '{
+    "display_name": "Demo Data Store",
+    "slug": "datastore",
+    "description": "Read-only analytic demo data store (synthetic, unclassified).",
+    "transport": "streamable_http",
+    "url": "http://datastore-mcp.coder-demo-mcp.svc.cluster.local:8000/mcp",
+    "auth_type": "none",
+    "availability": "default_on",
+    "enabled": true,
+    "model_intent": true,
+    "allow_in_plan_mode": true
+  }'
+```
+
+This is a live API object (not in git). In a Coder Agents chat the tools
+appear as `datastore__list_tables`, `datastore__describe_table`,
+`datastore__query`. Verified live: a chat invoked all three and returned the
+real per-region report counts.
+
+### B. AI Gateway injection (in-workspace Claude Code / aibridge messages)
+
 1. The user authenticates the **Demo Data Store** provider once at
    `https://dev.usgov.coderdemo.io/external-auth/datastore` (standard External
    Auth connect, redirects to Keycloak).
