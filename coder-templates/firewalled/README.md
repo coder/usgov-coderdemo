@@ -27,17 +27,20 @@ seeds the agent with the task prompt.
 The `module "claude_code"` block sets `enable_boundary = true` and
 `use_boundary_directly = true`, so the module installs the standalone
 `boundary` binary and launches `boundary -- claude`. The allowlist and jail
-type are read from `~/.config/coder_boundary/config.yaml`, written by the
-module `pre_install_script` before Claude Code starts:
+type come from `~/.config/coder_boundary/config.yaml`, rendered from
+`boundary.config.yaml.tftpl` and written by the module `pre_install_script`
+before Claude Code starts. The agent env vars `BOUNDARY_CONFIG` and
+`BOUNDARY_JAIL_TYPE=landjail` make boundary load that config and use landjail
+reliably (boundary v0.9.0 dropped config auto-discovery).
 
-```yaml
-allowlist:
-  - "domain=dev.usgov.coderdemo.io"   # AI Gateway egress (REQUIRED)
-  - "domain=gitlab.usgov.coderdemo.io" # in-cluster GitLab SCM
-jail_type: landjail
-log_dir: /tmp/boundary_logs
-log_level: warn
-```
+The allowlist (`boundary.config.yaml.tftpl`) is adapted from the Red Hat
+Summit 2026 demo (`coder/demo-aigov-rhaiis-rhsummit-2026`). It uses Claude
+Code's default allowed domains (most package managers, GitHub, container
+registries, cloud SDKs) plus this deployment's Coder host (`${coder_host}`,
+rendered from the access URL) and the in-cluster GitLab. **npm is
+intentionally omitted**, so asking the agent to `npm install <anything>` is
+the obvious DENY in the demo. Edit the `.tftpl` file to change the allowlist;
+do not inline rules in `main.tf`.
 
 Why `use_boundary_directly = true`: the default `coder boundary` subcommand
 verifies the deployment license via an authenticated client, but the agent
@@ -53,13 +56,19 @@ well past the Landlock 6.7 floor and `landlock` is in the node LSM stack.
 boundary -- curl -sS -o /dev/null -w '%{http_code}\n' \
   https://dev.usgov.coderdemo.io/api/v2/buildinfo
 
-# Denied: anything off the allowlist is blocked (boundary returns 403)
-boundary -- curl -sS -o /dev/null -w '%{http_code}\n' https://example.com
+# Allowed: PyPI is on the allowlist
+boundary -- curl -sS -o /dev/null -w '%{http_code}\n' https://pypi.org
+
+# Denied: npm is intentionally off the allowlist (boundary returns 403)
+boundary -- curl -sS -o /dev/null -w '%{http_code}\n' https://registry.npmjs.org
 ```
 
-Claude Code itself keeps working because its `ANTHROPIC_BASE_URL` points at
-the allowlisted gateway host. To roll back to an un-firewalled workspace, use
-the `claude-code` template instead (or set `enable_boundary = false`).
+The headline demo: ask Claude Code to `npm install left-pad`. boundary denies
+the egress and the deny shows up live in the boundary Grafana dashboard and
+the coderd audit log with owner / workspace / agent attribution. Claude Code
+itself keeps working because its `ANTHROPIC_BASE_URL` points at the
+allowlisted gateway host. To roll back to an un-firewalled workspace, use the
+`claude-code` template instead (or set `enable_boundary = false`).
 
 ## What's inside
 

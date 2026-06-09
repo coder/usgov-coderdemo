@@ -15,13 +15,19 @@
 #     path needs a logged-in coder CLI session (license check); the agent has
 #     only an agent token, so the standalone binary is the reliable path.
 #   - The module adds no --allow / --jail-type flags, so the allowlist and
-#     jail type come from ~/.config/coder_boundary/config.yaml, written by
-#     pre_install_script below before Claude Code launches.
+#     jail type come from ~/.config/coder_boundary/config.yaml. That file is
+#     rendered from boundary.config.yaml.tftpl and written by
+#     pre_install_script; BOUNDARY_CONFIG + BOUNDARY_JAIL_TYPE agent env vars
+#     make boundary load it and use landjail reliably.
 #
-# Allowlist (config.yaml): dev.usgov.coderdemo.io (AI Gateway egress,
-# REQUIRED or Claude Code breaks) and gitlab.usgov.coderdemo.io (SCM).
-# jail_type landjail needs no added capabilities (AL2023 kernel 6.18
-# exceeds the Landlock 6.7 floor; landlock is in the node LSM stack).
+# Allowlist (boundary.config.yaml.tftpl): adapted from the Red Hat Summit
+# 2026 demo (coder/demo-aigov-rhaiis-rhsummit-2026), which uses Claude
+# Code's default allowed domains (package managers, GitHub, container
+# registries, cloud SDKs) plus this deployment's Coder host and the
+# in-cluster GitLab. npm is intentionally omitted so `npm install` is the
+# obvious DENY in the demo. jail_type landjail needs no added capabilities
+# (AL2023 kernel 6.18 exceeds the Landlock 6.7 floor; landlock is in the
+# node LSM stack).
 #
 # Runs Claude Code as a Coder Agent inside a Kubernetes pod on the EKS
 # cluster. Claude Code is wired through the Coder AI Gateway (AI Bridge)
@@ -224,6 +230,17 @@ locals {
   # For documentation/readme parity. The claude-code module derives the
   # same value internally from data.coder_workspace.me.access_url.
   ai_gateway_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/aibridge/anthropic"
+
+  # Coder access URL host, substituted into the boundary allowlist so the
+  # agent can reach the AI Gateway, AgentAPI, and the workspace agent.
+  coder_host = replace(replace(data.coder_workspace.me.access_url, "https://", ""), "http://", "")
+
+  # Agent firewall allowlist, rendered from the sibling
+  # boundary.config.yaml.tftpl (adapted from the Red Hat Summit 2026 demo).
+  # Edit that file to change the allowlist; do not inline rules here.
+  boundary_config_yaml = templatefile("${path.module}/boundary.config.yaml.tftpl", {
+    coder_host = local.coder_host
+  })
 }
 
 # -----------------------------------------------------------------------------
@@ -304,6 +321,25 @@ resource "coder_env" "anthropic_auth_token" {
 }
 
 # -----------------------------------------------------------------------------
+# Agent firewall env
+# -----------------------------------------------------------------------------
+# boundary v0.9.0 no longer auto-discovers ~/.config/coder_boundary/config.yaml,
+# so point it at the rendered config explicitly and pin landjail. These env
+# vars are read by both the module-launched `boundary -- claude` and any
+# manual `boundary -- <cmd>` run in a workspace terminal.
+resource "coder_env" "boundary_config" {
+  agent_id = coder_agent.main.id
+  name     = "BOUNDARY_CONFIG"
+  value    = "/home/coder/.config/coder_boundary/config.yaml"
+}
+
+resource "coder_env" "boundary_jail_type" {
+  agent_id = coder_agent.main.id
+  name     = "BOUNDARY_JAIL_TYPE"
+  value    = "landjail"
+}
+
+# -----------------------------------------------------------------------------
 # Claude Code (Coder registry module) + Coder Task
 # -----------------------------------------------------------------------------
 
@@ -340,26 +376,24 @@ module "claude_code" {
   boundary_version      = "latest"
 
   # The 4.7.3 module passes no --allow / --jail-type flags to boundary, so
-  # this config file is the ONLY source of the allowlist and jail type. It
-  # must exist before Claude Code starts, so it is written in
-  # pre_install_script (runs before the start script that launches boundary).
-  # Allowing dev.usgov.coderdemo.io is REQUIRED: it is the AI Gateway egress
-  # that Claude Code depends on. Everything not listed is denied + audited.
+  # the allowlist and jail type come ONLY from
+  # ~/.config/coder_boundary/config.yaml. That file is rendered from the
+  # sibling boundary.config.yaml.tftpl (Red Hat Summit 2026 allowlist) and
+  # written here, before Claude Code starts. The BOUNDARY_CONFIG and
+  # BOUNDARY_JAIL_TYPE agent env vars (below) make boundary load it reliably
+  # and use landjail even though boundary v0.9.0 dropped config
+  # auto-discovery. The base64 round-trip keeps the multi-line YAML intact
+  # inside the heredoc. Allowing the Coder host is REQUIRED: it is the AI
+  # Gateway egress Claude Code depends on. Everything not listed is denied
+  # and audited (npm is intentionally omitted as the demo DENY).
   pre_install_script = <<-EOT
     #!/bin/bash
     set -e
     mkdir -p "$HOME/.config/coder_boundary" /tmp/boundary_logs
     cfg="$HOME/.config/coder_boundary/config.yaml"
-    {
-      echo 'allowlist:'
-      echo '  - "domain=dev.usgov.coderdemo.io"'
-      echo '  - "domain=gitlab.usgov.coderdemo.io"'
-      echo 'jail_type: landjail'
-      echo 'log_dir: /tmp/boundary_logs'
-      echo 'log_level: warn'
-    } > "$cfg"
-    echo "[firewalled] wrote boundary config:"
-    cat "$cfg"
+    echo '${base64encode(local.boundary_config_yaml)}' | base64 -d > "$cfg"
+    chmod 600 "$cfg"
+    echo "[firewalled] wrote boundary config ($(grep -c '^  - ' "$cfg") allow rules)"
   EOT
 
   # Coder Tasks: seed the agent and report task status to the Coder UI via
