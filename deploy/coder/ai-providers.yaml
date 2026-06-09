@@ -67,18 +67,37 @@ providers:
       # before being listed here. Display names are prefixed "(direct)" so
       # the picker makes the direct-vs-Bedrock distinction obvious. The 4.x
       # Claude tiers are 200K context.
-      # Curated for the demo (going direct): only the two flagship direct models
-      # are enabled in the picker, Opus 4.8 and Sonnet 4.6 (the demo default).
-      # The rest stay listed here disabled so re-enabling is a one-line flip.
+      # Curated for the demo: only the two flagship direct models are enabled
+      # in the picker, Opus 4.8 and Sonnet 4.6 (the demo default). Display
+      # names follow the "<Model> (<Provider label>)" picker convention.
+      # Each enabled model carries a configured reasoning effort
+      # (provider_options.anthropic.effort) and an estimated cost. The rest
+      # stay listed here disabled so re-enabling is a one-line flip.
+      #
+      # COST FIGURES ARE ESTIMATES: representative public list prices in USD
+      # per 1M tokens for the matching model tier (these are demo model names,
+      # not billed). cache_read ~= 0.1x input, cache_write ~= 1.25x input.
       - model: "claude-opus-4-8"
-        display_name: "(direct) Claude Opus 4.8"
+        display_name: "Opus 4.8 (Anthropic Direct)"
         enabled: true
         context_limit: 200000
+        reasoning_effort: high   # anthropic enum: low|medium|high|xhigh|max
+        cost:                    # ESTIMATE (Opus tier), USD per 1M tokens
+          input: 15
+          output: 75
+          cache_read: 1.5
+          cache_write: 18.75
       - model: "claude-sonnet-4-6"
-        display_name: "(direct) Claude Sonnet 4.6"
+        display_name: "Sonnet 4.6 (Anthropic Direct)"
         enabled: true
         default: true
         context_limit: 200000
+        reasoning_effort: high   # anthropic enum: low|medium|high|xhigh|max
+        cost:                    # ESTIMATE (Sonnet tier), USD per 1M tokens
+          input: 3
+          output: 15
+          cache_read: 0.3
+          cache_write: 3.75
       - model: "claude-opus-4-7"
         display_name: "(direct) Claude Opus 4.7"
         enabled: false
@@ -132,45 +151,65 @@ providers:
       # search-preview, or transcription ids from the catalog). Display
       # names are prefixed "(direct)". Context limits: GPT-5 family 400K,
       # GPT-4.1 family ~1M (1047576), GPT-4o family 128K, o-series 200K.
+      # Curated for the demo: only GPT 5.5 is enabled in the picker (verified
+      # invocable, HTTP 200, against the live aibridge openai route). It
+      # carries a configured reasoning effort
+      # (provider_options.openai.reasoning_effort) and an estimated cost.
+      # Display name follows the "<Model> (<Provider label>)" picker
+      # convention. The other GA ids stay listed disabled for a one-line flip.
+      #
+      # COST FIGURES ARE ESTIMATES: representative public list prices in USD
+      # per 1M tokens for the matching model tier (demo model names, not
+      # billed). cache_read ~= 0.1x input, cache_write ~= 1.25x input.
+      - model: "gpt-5.5"
+        display_name: "GPT 5.5 (OpenAI Direct)"
+        enabled: true
+        context_limit: 400000
+        reasoning_effort: high   # openai enum: none|minimal|low|medium|high|xhigh
+        cost:                    # ESTIMATE (GPT-5 tier), USD per 1M tokens
+          input: 1.25
+          output: 10
+          cache_read: 0.125
+          cache_write: 1.5625
       - model: "gpt-5.2"
         display_name: "(direct) GPT-5.2"
-        enabled: true
+        enabled: false
         context_limit: 400000
       - model: "gpt-5.1"
         display_name: "(direct) GPT-5.1"
-        enabled: true
+        enabled: false
         context_limit: 400000
       - model: "gpt-5"
         display_name: "(direct) GPT-5"
-        enabled: true
+        enabled: false
         context_limit: 400000
       - model: "gpt-5-mini"
         display_name: "(direct) GPT-5 mini"
-        enabled: true
+        enabled: false
         context_limit: 400000
       - model: "gpt-4.1"
         display_name: "(direct) GPT-4.1"
-        enabled: true
+        enabled: false
         context_limit: 1047576
       - model: "gpt-4.1-mini"
         display_name: "(direct) GPT-4.1 mini"
-        enabled: true
+        enabled: false
         context_limit: 1047576
       - model: "gpt-4o"
         display_name: "(direct) GPT-4o"
-        enabled: true
+        enabled: false
         context_limit: 128000
       - model: "gpt-4o-mini"
         display_name: "(direct) GPT-4o mini"
-        enabled: true
+        enabled: false
         context_limit: 128000
       - model: "o3"
         display_name: "(direct) o3"
-        enabled: true
+        enabled: false
         context_limit: 200000
       - model: "o4-mini"
         display_name: "(direct) o4-mini"
-        enabled: true
+        enabled: false
         context_limit: 200000
 
   # --- Anthropic on Bedrock (GovCloud, IRSA): ENABLED + VERIFIED on v2.34.1 ---
@@ -205,7 +244,15 @@ providers:
       small_fast_model: "amazon.nova-pro-v1:0"
     models:
       # Reconciled now that the provider is enabled. Picker entry verified live.
+      # Bedrock uses the anthropic provider_options shape (anthropic.effort).
+      # Cost is an ESTIMATE (Sonnet tier, USD per 1M tokens).
       - model: "us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0"
-        display_name: "Claude Sonnet 4.5 (Bedrock GovCloud)"
+        display_name: "Sonnet 4.5 (GovCloud Bedrock)"
         enabled: true
         context_limit: 200000
+        reasoning_effort: high   # anthropic enum: low|medium|high|xhigh|max
+        cost:                    # ESTIMATE (Sonnet tier), USD per 1M tokens
+          input: 3
+          output: 15
+          cache_read: 0.3
+          cache_write: 3.75

@@ -295,6 +295,62 @@ def model_matches(mc, provider_id, model):
     return same_provider and (mc.get("model", "").strip().lower() == model.strip().lower())
 
 
+# Map the concise YAML cost keys to the API's model_config.cost field names.
+_COST_KEYMAP = {
+    "input": "input_price_per_million_tokens",
+    "output": "output_price_per_million_tokens",
+    "cache_read": "cache_read_price_per_million_tokens",
+    "cache_write": "cache_write_price_per_million_tokens",
+}
+
+
+def desired_model_config(p, m):
+    """Build the model_config object (cost + provider_options) from the YAML
+    model entry, or None when neither is declared. Cost is the per-1M-token
+    pricing block. reasoning_effort maps to the provider-specific options
+    shape: OpenAI uses provider_options.openai.reasoning_effort; Anthropic and
+    Bedrock both use provider_options.anthropic.effort."""
+    cost = m.get("cost") or {}
+    cost_map = {}
+    for yk, apik in _COST_KEYMAP.items():
+        if cost.get(yk) is not None:
+            cost_map[apik] = cost[yk]
+    mc = {}
+    if cost_map:
+        mc["cost"] = cost_map
+    effort = m.get("reasoning_effort")
+    if effort:
+        if p["type"] == "openai":
+            mc["provider_options"] = {"openai": {"reasoning_effort": effort}}
+        else:
+            # Anthropic-direct and Bedrock both use the anthropic options shape.
+            mc["provider_options"] = {"anthropic": {"effort": effort}}
+    return mc or None
+
+
+def _as_float(v):
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize_model_config(mc):
+    """Reduce a model_config dict to a comparable (effort, costs) tuple so the
+    desired YAML state and the live API state diff cleanly regardless of how
+    the server renders decimals (number vs string)."""
+    mc = mc or {}
+    cost = mc.get("cost") or {}
+    costs = tuple(_as_float(cost.get(apik)) for apik in _COST_KEYMAP.values())
+    po = mc.get("provider_options") or {}
+    effort = None
+    if isinstance(po.get("openai"), dict):
+        effort = po["openai"].get("reasoning_effort")
+    if isinstance(po.get("anthropic"), dict):
+        effort = po["anthropic"].get("effort") or effort
+    return (effort, costs)
+
+
 def reconcile_models(desired, live_providers, live_models, plan):
     for p in desired:
         pname = p["name"]
@@ -313,7 +369,8 @@ def reconcile_models(desired, live_providers, live_models, plan):
                          f"after provider {pname} is created; "
                          f"display_name={m.get('display_name', '')!r} "
                          f"enabled={m.get('enabled', True)} default={m.get('default', False)} "
-                         f"context_limit={m.get('context_limit')}",
+                         f"context_limit={m.get('context_limit')} "
+                         f"model_config={normalize_model_config(desired_model_config(p, m))}",
                          fn=lambda p=p, m=m: do_create_model(p, m))
                 continue
             existing = next((mc for mc in live_models
@@ -322,7 +379,8 @@ def reconcile_models(desired, live_providers, live_models, plan):
                 plan.add("model", "CREATE", label,
                          f"display_name={m.get('display_name', '')!r} "
                          f"enabled={m.get('enabled', True)} default={m.get('default', False)} "
-                         f"context_limit={m.get('context_limit')}",
+                         f"context_limit={m.get('context_limit')} "
+                         f"model_config={normalize_model_config(desired_model_config(p, m))}",
                          fn=lambda p=p, m=m: do_create_model(p, m))
                 continue
             changes = {}
@@ -334,11 +392,17 @@ def reconcile_models(desired, live_providers, live_models, plan):
                 changes["display_name"] = m.get("display_name", "")
             if m.get("context_limit") and int(existing.get("context_limit") or 0) != int(m["context_limit"]):
                 changes["context_limit"] = int(m["context_limit"])
+            desired_mc = desired_model_config(p, m)
+            if desired_mc is not None and \
+                    normalize_model_config(desired_mc) != normalize_model_config(existing.get("model_config")):
+                changes["model_config"] = desired_mc
             if not changes:
                 plan.add("model", "NOOP", label, "in sync")
             else:
-                plan.add("model", "UPDATE", label,
-                         "; ".join(f"{k}={v}" for k, v in changes.items()),
+                detail = "; ".join(
+                    f"{k}={normalize_model_config(v) if k == 'model_config' else v}"
+                    for k, v in changes.items())
+                plan.add("model", "UPDATE", label, detail,
                          fn=lambda mid=existing["id"], changes=dict(changes):
                          do_update_model(mid, changes))
 
@@ -397,6 +461,9 @@ def do_create_model(p, m):
         "is_default": bool(m.get("default", False)),
         "context_limit": int(m["context_limit"]),
     }
+    mc = desired_model_config(p, m)
+    if mc is not None:
+        payload["model_config"] = mc
     code, res = api("POST", "/api/experimental/chats/model-configs", payload)
     ok = code in (200, 201)
     return (ok, f"create model {p['name']}/{m['model']} -> {code}" + ("" if ok else f" {res}"))
