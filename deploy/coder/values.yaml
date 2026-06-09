@@ -181,6 +181,22 @@ coder:
     - name: CODER_AI_GATEWAY_ENABLED
       value: "true"
 
+    # --- AI Gateway: Coder built-in MCP injection -------------------------
+    # Inject Coder's built-in MCP tools (e.g. coder_list_templates,
+    # coder_whoami) into intercepted AI Gateway requests so every MCP tool
+    # call is GOVERNED and ATTRIBUTED at the gateway:
+    # aibridge_tool_usages.injected=true with
+    # server_url=<access_url>/api/experimental/mcp/http. Requires the
+    # mcp-server-http and oauth2 experiments (the built-in MCP HTTP server
+    # and its OAuth2 client registration). Upstream marks injected MCP in the
+    # AI Gateway deprecated (functional, security-only patches) until the
+    # replacement ships; acceptable for the demo. NOT an AI-provider seed
+    # var, so toggling it is seed-safe.
+    - name: CODER_AI_GATEWAY_INJECT_CODER_MCP_TOOLS
+      value: "true"
+    - name: CODER_EXPERIMENTS
+      value: "mcp-server-http,oauth2"
+
     # Provider 0 = Anthropic-direct (PRIMARY, demo reliability).
     # Egress to api.anthropic.com leaves the VPC via the NAT gateway.
     #
