@@ -1,11 +1,14 @@
 # Data-store MCP (`deploy/datastore-mcp/`)
 
 A read-only Model Context Protocol (MCP) server over a small, synthetic,
-UNCLASSIFIED Postgres "analytic data store", wired into the Coder AI Gateway
-so its tools are **injected and governed at the gateway** (every call is
-recorded in `aibridge_tool_usages` with `injected=true` and `server_url` set).
-It demonstrates the AOI "federated data integration / dynamically registered
-data sources via MCP" capability with full central governance.
+UNCLASSIFIED Postgres "analytic data store", registered with **Coder Agents**
+(the control-plane agentic chat) via the admin "MCP Servers" configuration so
+the agent can query a federated data source through MCP. It demonstrates the
+AOI "federated data integration / dynamically registered data sources via MCP"
+capability.
+
+This intentionally uses the supported Coder Agents MCP path and NOT the AI
+Gateway's injected-MCP mechanism, which is deprecated upstream.
 
 ## Pieces
 
@@ -35,29 +38,11 @@ kubectl apply -k deploy/datastore-mcp/k8s
 The demo Postgres holds only synthetic data and is ClusterIP-only. The
 credentials in `kustomization.yaml` are demo-only and intentionally low value.
 
-## Gateway wiring (in `deploy/coder/values.yaml`)
+## Register with Coder Agents (`/api/experimental/mcp/servers`)
 
-The MCP server is registered as a Coder **External Auth** app
-(`CODER_EXTERNAL_AUTH_1_*`, id `datastore`) backed by Keycloak realm `coder`,
-with `MCP_URL` pointing at the in-cluster Service and **no `VALIDATE_URL`**
-(so Coder's `ValidateToken` returns true while the user's link is unexpired;
-the MCP server does not check the bearer the gateway forwards). The Keycloak
-client `coder-datastore` has its access-token lifespan raised to 10h to avoid
-the gateway's no-refresh token-expiry behaviour on long demos.
-
-Client id/secret live in ASM `usgov-coderdemo/coder/external-auth` (keys
-`datastore-client-id`, `datastore-client-secret`) and are synced by ESO into
-the `coder-external-auth` Secret, keeping ASM the single source of truth.
-
-## Using it in the demo
-
-The data-store MCP is available on three surfaces, all governed/attributed:
-
-### A. Coder Agents (control-plane chat) via the "MCP Servers" admin page
-
-Registered as an `auth_type: none`, `streamable_http` server that coderd
-reaches in-cluster (no per-user OAuth needed). Reproduce the live object
-(Admin Settings -> MCP Servers, or API):
+The MCP server is registered as an `auth_type: none`, `streamable_http` server
+that coderd reaches in-cluster (no per-user OAuth needed). Configure it from
+Admin Settings -> MCP Servers, or via the API:
 
 ```sh
 curl -X POST "$CODER_URL/api/experimental/mcp/servers" \
@@ -76,38 +61,27 @@ curl -X POST "$CODER_URL/api/experimental/mcp/servers" \
   }'
 ```
 
-This is a live API object (not in git). In a Coder Agents chat the tools
-appear as `datastore__list_tables`, `datastore__describe_table`,
-`datastore__query`. Verified live: a chat invoked all three and returned the
-real per-region report counts.
-
-### B. AI Gateway injection (in-workspace Claude Code / aibridge messages)
-
-1. The user authenticates the **Demo Data Store** provider once at
-   `https://dev.usgov.coderdemo.io/external-auth/datastore` (standard External
-   Auth connect, redirects to Keycloak).
-2. After that, any AI Gateway request by that user (Coder Agents chat or
-   Claude Code in a workspace) has the data-store tools injected as
-   `bmcp_datastore_list_tables`, `bmcp_datastore_describe_table`,
-   `bmcp_datastore_query`.
-3. Every call is recorded with `injected=true` and
-   `server_url=http://datastore-mcp.coder-demo-mcp.svc.cluster.local:8000/mcp`,
-   visible in the AI Gateway governance dashboard
-   ("MCP Servers & Tool Sources").
+This is a live API object (DB-resident, not in git). In a Coder Agents chat
+the tools appear as `datastore__list_tables`, `datastore__describe_table`,
+`datastore__query`.
 
 ## Verify
 
-```sql
-SELECT tool, server_url, injected, count(*)
-FROM aibridge_tool_usages
-WHERE server_url LIKE '%datastore-mcp%'
-GROUP BY 1,2,3;
-```
+Start a Coder Agents chat that has the Demo Data Store server enabled and ask
+it to query the data (for example, "how many reports per region?"). The agent
+calls `datastore__list_tables` / `datastore__describe_table` /
+`datastore__query` and returns the real rows. Verified live: a chat invoked
+all three tools and returned the per-region report counts.
 
 ## Notes / known follow-ups
 
-- Gateway-side injected MCP is marked **deprecated** upstream (functional,
-  security-only patches) until the replacement ships. Fine for the demo.
+- Uses the supported Coder Agents MCP path; the AI Gateway injected-MCP
+  mechanism (External Auth `MCP_URL`, `CODER_AI_GATEWAY_INJECT_CODER_MCP_TOOLS`)
+  is deprecated upstream and is deliberately NOT used here.
+- The Coder Agents "MCP Servers" config is a live, DB-resident API object, not
+  captured in git. A future idempotent reconciler (git desired-state ->
+  `/api/experimental/mcp/servers`) would make it reproducible like the AI
+  providers.
 - The demo Postgres uses an `emptyDir`, so data resets on pod restart (the
   seed reloads). That is intentional for a throwaway demo store.
 - The custom MCP image is built locally and pushed to ECR; it is not part of

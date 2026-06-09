@@ -152,46 +152,6 @@ coder:
     - name: CODER_EXTERNAL_AUTH_0_SCOPES
       value: "read_user read_repository write_repository"
 
-    # --- Data-store MCP external auth (Keycloak-backed, gateway injection) --
-    # Wires the in-cluster datastore MCP server (Streamable HTTP) as a Coder
-    # External Auth app so the AI Gateway injects its read-only data tools
-    # and governs every call (aibridge_tool_usages.injected=true,
-    # server_url=<MCP_URL>). The injected tool names are prefixed
-    # bmcp_datastore_* by the gateway. VALIDATE_URL is intentionally omitted:
-    # with no validation URL, Coder's ValidateToken returns true while the
-    # user's link is unexpired, which is all the gateway's injection gate
-    # needs (the MCP server does not check the token itself). The Keycloak
-    # client access-token lifespan is raised to 10h to avoid the gateway's
-    # no-refresh expiry on long demos. Client id/secret come from ASM
-    # usgov-coderdemo/coder/external-auth (synced by ESO into the
-    # coder-external-auth Secret). The demo user authenticates this provider
-    # once at /external-auth/datastore before tools are injected.
-    - name: CODER_EXTERNAL_AUTH_1_ID
-      value: "datastore"
-    - name: CODER_EXTERNAL_AUTH_1_DISPLAY_NAME
-      value: "Demo Data Store"
-    - name: CODER_EXTERNAL_AUTH_1_CLIENT_ID
-      valueFrom:
-        secretKeyRef:
-          name: coder-external-auth
-          key: datastore-client-id
-    - name: CODER_EXTERNAL_AUTH_1_CLIENT_SECRET
-      valueFrom:
-        secretKeyRef:
-          name: coder-external-auth
-          key: datastore-client-secret
-    - name: CODER_EXTERNAL_AUTH_1_AUTH_URL
-      value: "https://auth.usgov.coderdemo.io/realms/coder/protocol/openid-connect/auth"
-    - name: CODER_EXTERNAL_AUTH_1_TOKEN_URL
-      value: "https://auth.usgov.coderdemo.io/realms/coder/protocol/openid-connect/token"
-    - name: CODER_EXTERNAL_AUTH_1_SCOPES
-      value: "openid"
-    - name: CODER_EXTERNAL_AUTH_1_MCP_URL
-      value: "http://datastore-mcp.coder-demo-mcp.svc.cluster.local:8000/mcp"
-    # Inject only the read-only data tools (names matched pre-prefix).
-    - name: CODER_EXTERNAL_AUTH_1_MCP_TOOL_ALLOW_REGEX
-      value: "(list_tables|describe_table|query)"
-
     # --- App isolation hardening ------------------------------------------
     # Disable path-based workspace apps so every workspace app is served only
     # from its own *.usgov.coderdemo.io subdomain. Path apps share the main
@@ -220,22 +180,6 @@ coder:
     # guard). See README "AI Gateway provider seeding" for the safe workflow.
     - name: CODER_AI_GATEWAY_ENABLED
       value: "true"
-
-    # --- AI Gateway: Coder built-in MCP injection -------------------------
-    # Inject Coder's built-in MCP tools (e.g. coder_list_templates,
-    # coder_whoami) into intercepted AI Gateway requests so every MCP tool
-    # call is GOVERNED and ATTRIBUTED at the gateway:
-    # aibridge_tool_usages.injected=true with
-    # server_url=<access_url>/api/experimental/mcp/http. Requires the
-    # mcp-server-http and oauth2 experiments (the built-in MCP HTTP server
-    # and its OAuth2 client registration). Upstream marks injected MCP in the
-    # AI Gateway deprecated (functional, security-only patches) until the
-    # replacement ships; acceptable for the demo. NOT an AI-provider seed
-    # var, so toggling it is seed-safe.
-    - name: CODER_AI_GATEWAY_INJECT_CODER_MCP_TOOLS
-      value: "true"
-    - name: CODER_EXPERIMENTS
-      value: "mcp-server-http,oauth2"
 
     # Provider 0 = Anthropic-direct (PRIMARY, demo reliability).
     # Egress to api.anthropic.com leaves the VPC via the NAT gateway.
