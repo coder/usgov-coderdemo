@@ -1,0 +1,258 @@
+# AI providers + model presets: declarative source of truth (post-seed).
+#
+# WHY THIS FILE EXISTS
+# Since Coder v2.34 the AI Gateway providers live in the DATABASE, managed at
+# https://dev.usgov.coderdemo.io/ai/settings or the AI Providers API
+# (/api/v2/ai/providers). The CODER_AI_GATEWAY_PROVIDER_* Helm env vars are
+# DEPRECATED: they SEED the database ONCE on first boot, then the database is
+# authoritative. Changing a seeded env var later makes coderd fail to start
+# (drift guard). See deploy/coder/README.md "provider env vars seed the DB ONCE".
+#
+# Therefore providers and models are reconciled through the API, never through
+# Helm. Treat deploy/coder/values.yaml CODER_AI_GATEWAY_PROVIDER_* as a frozen
+# one-time seed; this file is the ongoing source of truth.
+#   reconcile:  scripts/reconcile-ai-providers.py --dry-run   # read-only plan
+#   apply:      scripts/reconcile-ai-providers.py --apply     # operator only
+#
+# ONE SHARED PROVIDER STORE (verified, v2.34.0)
+# The ai_providers table backs BOTH paths:
+#   1. AI Gateway / aibridge in-workspace path
+#      POST /api/v2/aibridge/<provider-name>/v1/...
+#   2. Coder Agents control-plane model picker
+#      GET /api/experimental/chats/models reads the SAME ai_providers rows
+#      (getUserChatProviderAvailability -> GetAIProviders). The legacy separate
+#      chat-provider API now returns HTTP 410 "Use AI provider APIs instead".
+# Provider NAME is the routing id and must stay lowercase-hyphenated. The
+# anthropic-direct provider must be named exactly "anthropic" because the
+# claude-code workspace module hardcodes
+# ANTHROPIC_BASE_URL=<access-url>/api/v2/aibridge/anthropic.
+#
+# MODELS ARE A SEPARATE TABLE (chat_model_configs)
+# AIProvider rows carry no model list (only Bedrock settings carry model +
+# small_fast_model). The model picker is populated from chat_model_configs,
+# managed via /api/experimental/chats/model-configs, each row tied to an
+# enabled provider by ai_provider_id. A model preset can only be created while
+# its provider is enabled (the API returns 412 otherwise). The anthropic and
+# openai direct providers below carry the full validated direct-model set; the
+# Bedrock preset is reconciled only once that provider is enabled.
+#
+# KEYS NEVER LIVE IN THIS FILE
+# Provider keys are referenced by env var name (key_from_env). The reconciler
+# reads the value from the environment and passes it via stdin/body, never via
+# argv or a URL, and never logs it. Anthropic-direct and OpenAI use a static
+# key; Bedrock uses IRSA (no static key, AWS SDK default credential chain).
+
+version: 1
+
+providers:
+  # --- Anthropic direct (PRIMARY, demo default) --------------------------
+  # Egress to api.anthropic.com leaves the VPC via the NAT gateway. The real
+  # key is applied from ANTHROPIC_KEY (authoritative in ASM
+  # usgov-coderdemo/coder/ai, also synced to k8s coder/coder-ai by ESO);
+  # re-apply with ANTHROPIC_KEY set to rotate it. Name MUST be "anthropic".
+  - type: anthropic
+    name: anthropic
+    display_name: "Anthropic (direct)"
+    enabled: true
+    base_url: "https://api.anthropic.com"
+    key_from_env: ANTHROPIC_KEY
+    models:
+      # Direct Anthropic API model ids (NOT Bedrock: no us./us-gov. prefix
+      # and no -v1:0 suffix). This is the full Claude family the Anthropic
+      # API advertises on this deployment (GET /api/v2/aibridge/anthropic/
+      # v1/models), adapted from the RH Summit 2026 Bedrock allowlist in
+      # reference/demo-aigov-rhsummit-2026/scripts/
+      # coder-agents-provider-model-config.sh. Each id was verified
+      # invocable (HTTP 200) against the live aibridge anthropic route
+      # before being listed here. Display names are prefixed "(direct)" so
+      # the picker makes the direct-vs-Bedrock distinction obvious. The 4.x
+      # Claude tiers are 200K context.
+      # Curated for the demo: only the two flagship direct models are enabled
+      # in the picker, Opus 4.8 and Sonnet 4.6 (the demo default). Display
+      # names follow the "<Model> (<Provider label>)" picker convention.
+      # Each enabled model carries a configured reasoning effort
+      # (provider_options.anthropic.effort) and an estimated cost. The rest
+      # stay listed here disabled so re-enabling is a one-line flip.
+      #
+      # COST FIGURES ARE ESTIMATES: representative public list prices in USD
+      # per 1M tokens for the matching model tier (these are demo model names,
+      # not billed). cache_read ~= 0.1x input, cache_write ~= 1.25x input.
+      - model: "claude-opus-4-8"
+        display_name: "Opus 4.8 (Anthropic Direct)"
+        enabled: true
+        context_limit: 200000
+        reasoning_effort: high   # anthropic enum: low|medium|high|xhigh|max
+        cost:                    # ESTIMATE (Opus tier), USD per 1M tokens
+          input: 15
+          output: 75
+          cache_read: 1.5
+          cache_write: 18.75
+      - model: "claude-sonnet-4-6"
+        display_name: "Sonnet 4.6 (Anthropic Direct)"
+        enabled: true
+        default: true
+        context_limit: 200000
+        reasoning_effort: high   # anthropic enum: low|medium|high|xhigh|max
+        cost:                    # ESTIMATE (Sonnet tier), USD per 1M tokens
+          input: 3
+          output: 15
+          cache_read: 0.3
+          cache_write: 3.75
+      - model: "claude-opus-4-7"
+        display_name: "(direct) Claude Opus 4.7"
+        enabled: false
+        context_limit: 200000
+      - model: "claude-opus-4-6"
+        display_name: "(direct) Claude Opus 4.6"
+        enabled: false
+        context_limit: 200000
+      - model: "claude-opus-4-5-20251101"
+        display_name: "(direct) Claude Opus 4.5"
+        enabled: false
+        context_limit: 200000
+      - model: "claude-opus-4-1-20250805"
+        display_name: "(direct) Claude Opus 4.1"
+        enabled: false
+        context_limit: 200000
+      - model: "claude-opus-4-20250514"
+        display_name: "(direct) Claude Opus 4"
+        enabled: false
+        context_limit: 200000
+      - model: "claude-sonnet-4-5-20250929"
+        display_name: "(direct) Claude Sonnet 4.5"
+        enabled: false
+        context_limit: 200000
+      - model: "claude-sonnet-4-20250514"
+        display_name: "(direct) Claude Sonnet 4"
+        enabled: false
+        context_limit: 200000
+      - model: "claude-haiku-4-5-20251001"
+        display_name: "(direct) Claude Haiku 4.5"
+        enabled: false
+        context_limit: 200000
+
+  # --- OpenAI direct (SECONDARY) -----------------------------------------
+  # Routes through aibridge's OpenAI client. aibridge route:
+  # POST /api/v2/aibridge/openai/v1/chat/completions. Default upstream base is
+  # https://api.openai.com/v1/. Apply with OPENAI_KEY set to the real sk-...
+  # value. Model ids are current GA OpenAI ids and are operator-tunable; they
+  # are validated post-apply against the live picker (the create API only
+  # enforces a provider-prefix check, not a fixed catalog).
+  - type: openai
+    name: openai
+    display_name: "OpenAI (direct)"
+    enabled: true
+    base_url: "https://api.openai.com/v1/"
+    key_from_env: OPENAI_KEY
+    models:
+      # Direct OpenAI API model ids, verified invocable (HTTP 200) against
+      # the live aibridge openai route before being listed. General-purpose
+      # chat/reasoning models only (no embeddings, audio, image, realtime,
+      # search-preview, or transcription ids from the catalog). Display
+      # names are prefixed "(direct)". Context limits: GPT-5 family 400K,
+      # GPT-4.1 family ~1M (1047576), GPT-4o family 128K, o-series 200K.
+      # Curated for the demo: only GPT 5.5 is enabled in the picker (verified
+      # invocable, HTTP 200, against the live aibridge openai route). It
+      # carries a configured reasoning effort
+      # (provider_options.openai.reasoning_effort) and an estimated cost.
+      # Display name follows the "<Model> (<Provider label>)" picker
+      # convention. The other GA ids stay listed disabled for a one-line flip.
+      #
+      # COST FIGURES ARE ESTIMATES: representative public list prices in USD
+      # per 1M tokens for the matching model tier (demo model names, not
+      # billed). cache_read ~= 0.1x input, cache_write ~= 1.25x input.
+      - model: "gpt-5.5"
+        display_name: "GPT 5.5 (OpenAI Direct)"
+        enabled: true
+        context_limit: 400000
+        reasoning_effort: high   # openai enum: none|minimal|low|medium|high|xhigh
+        cost:                    # ESTIMATE (GPT-5 tier), USD per 1M tokens
+          input: 1.25
+          output: 10
+          cache_read: 0.125
+          cache_write: 1.5625
+      - model: "gpt-5.2"
+        display_name: "(direct) GPT-5.2"
+        enabled: false
+        context_limit: 400000
+      - model: "gpt-5.1"
+        display_name: "(direct) GPT-5.1"
+        enabled: false
+        context_limit: 400000
+      - model: "gpt-5"
+        display_name: "(direct) GPT-5"
+        enabled: false
+        context_limit: 400000
+      - model: "gpt-5-mini"
+        display_name: "(direct) GPT-5 mini"
+        enabled: false
+        context_limit: 400000
+      - model: "gpt-4.1"
+        display_name: "(direct) GPT-4.1"
+        enabled: false
+        context_limit: 1047576
+      - model: "gpt-4.1-mini"
+        display_name: "(direct) GPT-4.1 mini"
+        enabled: false
+        context_limit: 1047576
+      - model: "gpt-4o"
+        display_name: "(direct) GPT-4o"
+        enabled: false
+        context_limit: 128000
+      - model: "gpt-4o-mini"
+        display_name: "(direct) GPT-4o mini"
+        enabled: false
+        context_limit: 128000
+      - model: "o3"
+        display_name: "(direct) o3"
+        enabled: false
+        context_limit: 200000
+      - model: "o4-mini"
+        display_name: "(direct) o4-mini"
+        enabled: false
+        context_limit: 200000
+
+  # --- Anthropic on Bedrock (GovCloud, IRSA): ENABLED + VERIFIED on v2.34.1 ---
+  # In-boundary GovCloud inference via IRSA (no static key; the AWS SDK default
+  # credential chain resolves the web-identity token from the annotated
+  # coder/coder service account). Claude Sonnet 4.5 (the us-gov. cross-region
+  # inference profile plus the underlying foundation-model) is ACTIVE in
+  # us-gov-west-1, and the usgov-coderdemo-coder-bedrock IRSA role allowlists
+  # both in the gov regions.
+  #
+  # Previously DISABLED on v2.34.0 by a SigV4 403 ("signature does not match"):
+  # the AI Gateway egress signed requests that still carried inbound proxy
+  # headers (x-forwarded-for, x-envoy-*, x-request-id), so the canonical
+  # SignedHeaders never matched what Bedrock recomputed. Fixed upstream by
+  # coder/coder#26019 (strip proxy headers before signing), shipped in v2.34.1
+  # via backport #26053. Verified live on v2.34.1 (2026-06-08): InvokeModel via
+  # /api/v2/aibridge/anthropic-bedrock/v1/messages returns 200 for the blocking,
+  # streaming (SSE), and anthropic-beta header paths Claude Code uses (the
+  # earlier coder/aibridge#221 beta-header rejection no longer reproduces).
+  # Enabling is restart/seed-safe: the env drift guard hashes only {type,
+  # base_url, bedrock_region, keys}, not the enabled flag. NAME stays
+  # "anthropic-bedrock".
+  - type: bedrock
+    name: anthropic-bedrock
+    display_name: "Anthropic on Bedrock (GovCloud, IRSA)"
+    enabled: true
+    base_url: ""
+    auth: irsa            # no static key; do not set key_from_env for bedrock
+    bedrock:
+      region: "us-gov-west-1"
+      model: "us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      small_fast_model: "amazon.nova-pro-v1:0"
+    models:
+      # Reconciled now that the provider is enabled. Picker entry verified live.
+      # Bedrock uses the anthropic provider_options shape (anthropic.effort).
+      # Cost is an ESTIMATE (Sonnet tier, USD per 1M tokens).
+      - model: "us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0"
+        display_name: "Sonnet 4.5 (GovCloud Bedrock)"
+        enabled: true
+        context_limit: 200000
+        reasoning_effort: high   # anthropic enum: low|medium|high|xhigh|max
+        cost:                    # ESTIMATE (Sonnet tier), USD per 1M tokens
+          input: 3
+          output: 15
+          cache_read: 0.3
+          cache_write: 3.75

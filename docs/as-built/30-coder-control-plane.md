@@ -1,8 +1,11 @@
 # 30. Coder control plane (as-built)
 
-Coder **v2.34.0** control plane for the GovCloud demo, served at
+Coder **v2.34.1** control plane for the GovCloud demo, served at
 `https://dev.usgov.coderdemo.io`. This document walks `deploy/coder/values.yaml`
 section by section and records what was verified against the live deployment.
+v2.34.1 is a patch over v2.34.0 that strips Istio/Envoy proxy headers before
+SigV4 signing, fixing GovCloud Bedrock egress (coder/coder#26019, backport
+#26053); see `60-ai-gateway.md`.
 
 Scope of `values.yaml`: the Coder control plane only (Deployment,
 ServiceAccount, Service, Ingress, and `env`). The platform layer owns
@@ -22,9 +25,9 @@ Always target `https://dev.usgov.coderdemo.io` explicitly; the ambient
 
 | Check | Source / command | Result |
 |---|---|---|
-| Server version | `GET /api/v2/buildinfo` | `v2.34.0+3006da5` |
-| Helm release | `helm -n coder list` | `coder-2.34.0`, app `2.34.0`, revision **4**, `deployed` |
-| Deployment image | `kubectl -n coder get deploy coder -o jsonpath` | `.../ghcr/coder/coder:v2.34.0` |
+| Server version | `GET /api/v2/buildinfo` | `v2.34.1+2e8d80a` |
+| Helm release | `helm -n coder list` | `coder-2.34.1`, app `2.34.1`, revision **11**, `deployed` |
+| Deployment image | `kubectl -n coder get deploy coder -o jsonpath` | `.../ghcr/coder/coder:v2.34.1` |
 | Replicas | same | `1` |
 | Service type | `kubectl -n coder get svc coder` | `ClusterIP` |
 | Ingress | `kubectl -n coder get ingress` | class `nginx`, hosts `dev.` + `*.usgov.coderdemo.io` |
@@ -36,17 +39,17 @@ Always target `https://dev.usgov.coderdemo.io` explicitly; the ambient
 coder:
   image:
     repo: "430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/ghcr/coder/coder"
-    tag: "v2.34.0"
+    tag: "v2.34.1"
     pullPolicy: IfNotPresent
 ```
 
-The upstream `ghcr.io/coder/coder:v2.34.0` is mirrored into private ECR because
+The upstream `ghcr.io/coder/coder:v2.34.1` is mirrored into private ECR because
 GovCloud has no pull-through cache. The mirror path follows the convention
 `ghcr.io/<repo>:<tag>` to `<registry>/ghcr/<repo>:<tag>`
-(`deploy/CONVENTIONS.md:47-57`). The chart version is pinned to `2.34.0`
+(`deploy/CONVENTIONS.md:47-57`). The chart version is pinned to `2.34.1`
 (`deploy/coder/README.md:48-53`, `deploy/CONVENTIONS.md:39-45`). Source:
 `deploy/coder/values.yaml:18-26`. Verified live: the running Deployment uses
-`430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/ghcr/coder/coder:v2.34.0`.
+`430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/ghcr/coder/coder:v2.34.1`.
 
 ## ServiceAccount and IRSA (Bedrock)
 
@@ -267,12 +270,17 @@ the IRSA `AssumeRoleWithWebIdentity` exchange. Source:
 `deploy/coder/values.yaml:159-215`. Provider behavior, routing, and the IRSA
 chain are documented in `60-ai-gateway.md`.
 
-Verified live: `deployment/config` `ai.bridge.enabled=true`, and the seeded
-`ai.bridge.providers` array contains `anthropic` (type `anthropic`, base
-`https://api.anthropic.com`) and `anthropic-bedrock` (type `bedrock`, region
+Verified live: `deployment/config` `ai.bridge.enabled=true`. The Helm env seeds
+two providers on first boot (`anthropic`, `anthropic-bedrock`); the database is
+authoritative thereafter. Live `GET /api/v2/ai/providers` now returns **three**
+enabled providers: `anthropic` (type `anthropic`, base
+`https://api.anthropic.com`), `openai` (type `openai`, added via the reconciler,
+not env-seeded), and `anthropic-bedrock` (type `bedrock`, region
 `us-gov-west-1`, model `us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0`,
-small fast model `amazon.nova-pro-v1:0`). `chat.ai_gateway_routing_enabled` is
-`true`.
+small fast model `amazon.nova-pro-v1:0`, enabled and verified on v2.34.1).
+`chat.ai_gateway_routing_enabled` is `true`. Provider management and the curated
+Coder Agents model picker are detailed in `60-ai-gateway.md` and
+`65-coder-agents.md`.
 
 ### Deprecated-AI-provider-seed drift guard
 

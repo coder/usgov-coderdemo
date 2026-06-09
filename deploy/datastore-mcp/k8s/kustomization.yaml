@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: coder-demo-mcp
+
+resources:
+  - namespace.yaml
+  - demo-db.yaml
+  - mcp-server.yaml
+
+configMapGenerator:
+  - name: demo-db-seed
+    files:
+      - seed.sql
+
+# Synthetic demo credentials only. The demo Postgres holds UNCLASSIFIED
+# synthetic data and is not reachable outside the cluster. The mcp_ro role
+# and its password are defined in seed.sql; DATABASE_URI must match.
+secretGenerator:
+  - name: demo-db-secret
+    literals:
+      - POSTGRES_PASSWORD=demo_pg_admin_pw
+  - name: datastore-mcp-secret
+    literals:
+      - DATABASE_URI=postgres://mcp_ro:mcp_ro_demo_pw@demo-db.coder-demo-mcp.svc.cluster.local:5432/demo?sslmode=disable
+
+generatorOptions:
+  disableNameSuffixHash: true

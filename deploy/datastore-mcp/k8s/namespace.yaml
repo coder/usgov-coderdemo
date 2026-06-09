@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: coder-demo-mcp
+  labels:
+    app.kubernetes.io/part-of: usgov-coderdemo
+    purpose: ai-workspace-mcp-demo

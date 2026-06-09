@@ -12,7 +12,7 @@ an unauthenticated `GET /`.
 
 | Service | URL | Live check | Notes |
 |---|---|---|---|
-| Coder | `https://dev.usgov.coderdemo.io` | `200` (`/api/v2/buildinfo` -> `v2.34.0+3006da5`) | Owner password login or "Sign in with Keycloak". |
+| Coder | `https://dev.usgov.coderdemo.io` | `200` (`/api/v2/buildinfo` -> `v2.34.1+2e8d80a`) | Owner password login or "Sign in with Keycloak". |
 | Keycloak | `https://auth.usgov.coderdemo.io` | `302` (redirect to login) | Realm `coder`; admin console at `/admin`, master realm, user `admin`. |
 | GitLab | `https://gitlab.usgov.coderdemo.io` | `302` (redirect to login) | Root login; embedded Postgres. |
 | Kiali | `https://kiali.usgov.coderdemo.io/kiali` | Keycloak SSO (`/kiali/` -> `200`) | Istio mesh dashboard; OpenID login via realm `coder`, anonymous access disabled. |
@@ -98,7 +98,7 @@ Sources: `deploy/platform/README.md`, `deploy/coder/`, `deploy/keycloak/`,
 ## Helm upgrade pattern (Coder)
 
 ```sh
-helm upgrade coder ~/.cache/helm/repository/coder_helm_2.34.0.tgz \
+helm upgrade coder ~/.cache/helm/repository/coder_helm_2.34.1.tgz \
   --namespace coder \
   --values deploy/coder/values.yaml \
   --timeout 6m
@@ -141,7 +141,7 @@ ECR has no pull-through cache in GovCloud, so upstream images are copied in with
 scripts/mirror-images.sh                 # add --dry-run to preview
 ```
 
-Currently mirrored: `ghcr.io/coder/coder:v2.34.0`,
+Currently mirrored: `ghcr.io/coder/coder:v2.34.1`,
 `quay.io/keycloak/keycloak:26.6.3`, `docker.io/gitlab/gitlab-ce:19.0.1-ce.0`,
 `docker.io/codercom/enterprise-base:ubuntu-noble-20260601`, plus
 `postgres:18-alpine` for db bootstrap (`scripts/images.txt`, `STATUS.md`).
@@ -240,10 +240,13 @@ Rolling back the mesh:
    `anthropic` provider at `/ai/settings` (UI, not the `coder-ai` secret). No
    real Anthropic key exists anywhere in the environment (`STATUS.md`, facts
    sheet).
-2. **Bedrock Claude Sonnet 4.5 access gated.** Model access for
-   `us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0` needs an Anthropic
-   agreement via the account paired with GovCloud. The proven in-GovCloud
-   fallback that does invoke today is `amazon.nova-pro-v1:0` (`STATUS.md`).
+2. **Bedrock Claude Sonnet 4.5 (enabled, not a gap).** The `anthropic-bedrock`
+   provider is enabled and verified on v2.34.1: `InvokeModel` on
+   `us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0` is ACTIVE in
+   `us-gov-west-1` and returns HTTP 200 via IRSA (no key). The earlier v2.34.0
+   SigV4 `403` (proxy headers carried into signing) was fixed by
+   coder/coder#26019, shipped via backport #26053. `amazon.nova-pro-v1:0` is the
+   small-fast model (`STATUS.md`, `deploy/coder/ai-providers.yaml`).
 3. **IdP sync is built (not a gap).** Keycloak realm `coder` now carries the
    org/team/role group tree, the full-path `groups` claim mapper on the `coder`
    client, and Coder runs organization + group + role sync on every login

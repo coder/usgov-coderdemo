@@ -1,0 +1,74 @@
+# Datastore MCP server: read-only Streamable HTTP MCP over the demo Postgres.
+# The Coder AI Gateway (aibridged, in the coder namespace) reaches this over
+# ClusterIP and injects its tools into intercepted requests.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: datastore-mcp
+  labels:
+    app: datastore-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: datastore-mcp
+  template:
+    metadata:
+      labels:
+        app: datastore-mcp
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: datastore-mcp
+          image: "430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/usgov/datastore-mcp:0.1.0"
+          imagePullPolicy: IfNotPresent
+          args: []
+          env:
+            - name: LISTEN_ADDR
+              value: ":8000"
+            - name: MCP_PATH
+              value: "/mcp"
+            - name: DATABASE_URI
+              valueFrom:
+                secretKeyRef:
+                  name: datastore-mcp-secret
+                  key: DATABASE_URI
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: datastore-mcp
+spec:
+  selector:
+    app: datastore-mcp
+  ports:
+    - port: 8000
+      targetPort: 8000

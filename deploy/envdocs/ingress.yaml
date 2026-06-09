@@ -1,0 +1,73 @@
+# Ingress for envdocs.usgov.coderdemo.io (ingress-nginx).
+#
+# TLS terminates upstream at the ingress-nginx NLB (the single ACM wildcard cert
+# *.usgov.coderdemo.io on the controller Service), so ssl-redirect is disabled to
+# avoid an HTTP->HTTPS redirect loop (the controller receives plain HTTP from the
+# NLB). DNS: scripts/setup-envdocs.py adds an explicit Route53 alias
+# envdocs.usgov.coderdemo.io -> the ingress-nginx NLB, which is more specific than
+# the *.usgov.coderdemo.io wildcard (that wildcard points at the Istio gateway).
+#
+# Two Ingresses share the host:
+#   1) envdocs-oauth2 routes /oauth2/* to oauth2-proxy (no auth annotations), so
+#      the browser can reach /oauth2/start and /oauth2/callback.
+#   2) envdocs routes / to nginx, gated by the external-auth annotations that run
+#      an auth subrequest against oauth2-proxy and, on 401, send the browser to
+#      Keycloak via /oauth2/start.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: envdocs-oauth2
+  namespace: envdocs
+  labels:
+    app.kubernetes.io/name: oauth2-proxy
+    app.kubernetes.io/part-of: usgov-coderdemo
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    # oauth2-proxy sets a large session cookie (id_token + refresh_token) on the
+    # /oauth2/callback response. Raise the proxy buffer so ingress-nginx does not
+    # 502 with "upstream sent too big header".
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: envdocs.usgov.coderdemo.io
+      http:
+        paths:
+          - path: /oauth2
+            pathType: Prefix
+            backend:
+              service:
+                name: oauth2-proxy
+                port:
+                  number: 4180
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: envdocs
+  namespace: envdocs
+  labels:
+    app.kubernetes.io/name: envdocs
+    app.kubernetes.io/part-of: usgov-coderdemo
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    # Auth subrequest (internal service URL); browser redirect (public URL).
+    nginx.ingress.kubernetes.io/auth-url: "http://oauth2-proxy.envdocs.svc.cluster.local:4180/oauth2/auth"
+    nginx.ingress.kubernetes.io/auth-signin: "https://envdocs.usgov.coderdemo.io/oauth2/start?rd=$escaped_request_uri"
+    nginx.ingress.kubernetes.io/auth-response-headers: "X-Auth-Request-User, X-Auth-Request-Email"
+    # The auth subrequest to oauth2-proxy returns the large session cookie
+    # headers; raise the proxy buffer to avoid a 502 on the gated app response.
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: envdocs.usgov.coderdemo.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: envdocs
+                port:
+                  number: 80

@@ -23,14 +23,50 @@ All credentials generated overnight are in **`~/.config/usgov-coderdemo/generate
 passwords, and the Coder<->Keycloak OIDC client secret. The GitLab root password
 is `GITLAB_ROOT_PASSWORD` in `~/.config/usgov-coderdemo/env`.
 
+## Current state (2026-06-09)
+
+Follow-on wave applied live and pushed on branch `ws-2x/phase2` (DRAFT PR #38):
+
+- **Coder control plane v2.34.1** (was v2.34.0; image `ghcr/coder/coder:v2.34.1`,
+  live `v2.34.1+2e8d80a`, coderd 2/2 with 0 restarts). Driver: Bedrock SigV4
+  proxy-header fix (backport #26053). The two external provisioner daemons
+  (alpha/bravo) were rebuilt to v2.34.1.
+- **AI Gateway providers (DB-managed)**: `anthropic` (direct), `openai` (direct),
+  and `anthropic-bedrock` (GovCloud IRSA, `us-gov-west-1`, Sonnet 4.5) all
+  enabled. Bedrock is now ENABLED and verified HTTP 200 (blocking, streaming,
+  anthropic-beta); it was previously blocked on v2.34.0 by a SigV4 403.
+- **Coder Agents model picker** curated to exactly 4 enabled models, each at
+  reasoning effort `high` with an estimated per-model cost (USD per 1M in/out):
+  Opus 4.8 (Anthropic Direct) 15/75; Sonnet 4.6 (Anthropic Direct, DEFAULT)
+  3/15; GPT 5.5 (OpenAI Direct) 1.25/10; Sonnet 4.5 (GovCloud Bedrock) 3/15.
+  Reconciler `scripts/reconcile-ai-providers.py` was extended to manage
+  `model_config` (cost + effort).
+- **Coder Agents MCP**: a read-only `datastore` MCP server
+  (`deploy/datastore-mcp`) is registered via the supported path
+  (`/api/experimental/mcp/servers`; slug `datastore`, `auth_type=none`,
+  `default_on`, enabled). The deprecated gateway-injected MCP and the datastore
+  External Auth were removed.
+- **GitLab MCP dropped** (Linear CODAGT-570): GitLab CE 19.0.1 `/api/v4/mcp`
+  works standalone, but Coder v2.34.1 cannot connect (GitLab returns 204 on
+  `notifications/initialized` while `mark3labs/mcp-go` accepts only 200/202, and
+  the RFC 9728 resource-array breaks oauth2 auto-DCR). Not worth a 204-to-202
+  shim.
+- **Coder Agents chat spend-limits** configured live: global default $500/month
+  (master ON), group `alpha`/developers $100, group `bravo` "Everyone" $250
+  (org-wide), user `patrickplatform` $50. Precedence is user > MIN(group) >
+  default; enforcement is a hard HTTP 409. Control script
+  `scripts/demo-chat-spend-limits.py`; doc `docs/plans/chat-spend-limits.md`. The
+  AI Bridge `/ai/budget` path is non-functional scaffolding (not used).
+
 ## Foundations
 - [x] GovCloud creds (`demoenv-usgov`, acct 430737322961)
 - [x] Service quotas verified healthy
 - [x] ACM cert issued + sufficient (`*.usgov.coderdemo.io`)
 - [x] Route53 zone `Z06701704WFETYIRU5C8` + NS delegation LIVE
 - [x] DNS: `dev` / `auth` / `gitlab` / `*` alias A records -> ingress NLB
-- [ ] Bedrock Claude Sonnet 4.5 model access (needs Anthropic agreement via the
-      account PAIRED with GovCloud) — still gated
+- [x] Bedrock Claude Sonnet 4.5 model access ENABLED in GovCloud
+      (`us-gov-west-1`); the `anthropic-bedrock` AI Gateway provider is verified
+      HTTP 200 (unblocked by the Coder v2.34.1 SigV4 proxy-header fix)
 - [x] Bedrock fallback proven: `amazon.nova-pro-v1:0` invokes in GovCloud
 
 ## Substrate (Terraform, applied — PR #4 merged)
@@ -54,8 +90,8 @@ is `GITLAB_ROOT_PASSWORD` in `~/.config/usgov-coderdemo/env`.
 
 ## Apps (T1)
 - [x] Keycloak (`auth.`) — realm `coder` imported; authorize flow for client `coder` returns the login page
-- [x] Coder (`dev.`) v2.34.0 — licensed (AI Governance add-on + premium, entitled+enabled); OIDC SSO live
-- [x] AI Gateway providers (DB-managed): `anthropic` (direct, enabled) + `anthropic-bedrock` (IRSA, enabled)
+- [x] Coder (`dev.`) v2.34.1, licensed (AI Governance add-on + premium, entitled+enabled); OIDC SSO live
+- [x] AI Gateway providers (DB-managed): `anthropic` (direct), `openai` (direct), and `anthropic-bedrock` (GovCloud IRSA, `us-gov-west-1`, Sonnet 4.5) all enabled; Bedrock verified HTTP 200 (blocking/streaming/anthropic-beta)
 - [x] AI Gateway routing verified end to end: `POST /api/v2/aibridge/anthropic/v1/messages`
       reaches api.anthropic.com (currently 502 "keys failed authentication" — placeholder key)
 - [x] Template `claude-code` pushed; test workspace built, agent connected + healthy,

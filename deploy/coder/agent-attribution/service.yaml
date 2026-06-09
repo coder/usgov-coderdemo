@@ -1,0 +1,20 @@
+# ClusterIP Service for the GitLab to Coder bridge. GitLab (in-cluster on
+# gitlab-0) delivers webhooks to
+# http://agent-attribution-bridge.coder.svc.cluster.local:8080/webhook.
+# No public ingress is required for the demo.
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-attribution-bridge
+  namespace: coder
+  labels:
+    app.kubernetes.io/name: agent-attribution-bridge
+    app.kubernetes.io/part-of: usgov-coderdemo
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: agent-attribution-bridge
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

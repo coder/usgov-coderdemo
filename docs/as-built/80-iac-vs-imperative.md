@@ -75,9 +75,11 @@ Terraform resources (created by the mirror script, see below).
 | GitLab StatefulSet/Service/Ingress (embedded Postgres) | `kubectl apply -f deploy/gitlab/*` | `deploy/gitlab/*`; live pod `gitlab-0` |
 | GitLab CI runner (Helm, non-meshed `gitlab-runner` ns) | Helm (gitlab-runner chart 0.89.1) + `deploy/gitlab-runner/values.yaml` | live Helm release `gitlab-runner.v1..v2`; `deploy/gitlab-runner/` (PR #36) |
 | GitLab Container Registry route (Istio `VirtualService` to `gitlab.gitlab.svc:5050`) | `kubectl apply -f deploy/gitlab/virtualservice-registry.yaml` | live VS `gitlab-registry`; `deploy/gitlab/virtualservice-registry.yaml` (PR #36) |
-| Coder control plane | Helm release `coder` (5 revisions) + `deploy/coder/values.yaml` | live Helm release `coder.v1..v5` |
+| Coder control plane | Helm release `coder` (11 revisions, pinned `v2.34.1`) + `deploy/coder/values.yaml` | live Helm release `coder.v1..v11` |
 | Coder external provisioner daemons (`alpha`, `bravo` orgs, org-scoped keys) | `kubectl apply -f deploy/coder/provisioners.yaml` | live Deployments `coder-provisioner-alpha`/`-bravo`; `deploy/coder/provisioners.yaml`, `STATUS.md` |
-| Coder AI Gateway providers (`anthropic`, `anthropic-bedrock`) | env-seeded once, then DB-authoritative | `deploy/coder/values.yaml`; `STATUS.md` |
+| Coder AI Gateway providers + model presets (`anthropic`, `openai`, `anthropic-bedrock`; 4 enabled picker models with cost + reasoning effort) | env-seeded once (anthropic, bedrock), then DB-authoritative; reconciled via `scripts/reconcile-ai-providers.py` (API, `model_config` diff) from `deploy/coder/ai-providers.yaml` | `deploy/coder/ai-providers.yaml`; live `GET /api/v2/ai/providers` (3 enabled); `STATUS.md` |
+| Coder Agents datastore MCP server (read-only, supported path) | `POST /api/experimental/mcp/servers` (slug `datastore`, `streamable_http`, `auth_type none`, `default_on`, enabled); deprecated gateway-injected MCP removed from `values.yaml` | live `GET /api/experimental/mcp/servers`; `deploy/datastore-mcp/` |
+| Coder Agents chat spend-limits (global $500/mo default + group/user overrides; HTTP 409 enforcement) | `scripts/demo-chat-spend-limits.py` (API, `/api/experimental/chats/usage-limits`) | `scripts/demo-chat-spend-limits.py`; `docs/plans/chat-spend-limits.md` |
 | Coder classification banner (`UNCLASSIFIED - USGOVCLOUD`) | `scripts/set-appearance.sh` (runtime DB setting) | `scripts/set-appearance.sh`; `STATUS.md` |
 | Coder AI Governance add-on license | `coder licenses add` / UI (runtime JWT in DB) | `deploy/coder/README.md`; `STATUS.md` |
 | GitLab instance-wide OAuth app (id/secret -> `coder-external-auth`) | GitLab API / Rails console | `STATUS.md`; `deploy/coder/secrets.example.yaml` |

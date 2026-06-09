@@ -1,0 +1,65 @@
+site_name: usgov-coderdemo Environment Docs
+site_description: >-
+  As-built engineering documentation for the Coder plus AI demo running
+  entirely inside AWS GovCloud (us-gov-west-1).
+site_url: https://envdocs.usgov.coderdemo.io/
+docs_dir: docs
+use_directory_urls: true
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: green
+      accent: green
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: green
+      accent: green
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.tracking
+    - navigation.top
+    - navigation.indexes
+    - content.code.copy
+    - toc.follow
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - footnotes
+  - pymdownx.details
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - toc:
+      permalink: true
+
+extra:
+  generator: false
+
+nav:
+  - Overview: index.md
+  - Architecture: architecture.md
+  - Components:
+      - Coder control plane: coder-control-plane.md
+      - Identity (Keycloak): identity-keycloak.md
+      - GitLab SCM: gitlab.md
+      - AI Gateway: ai-gateway.md
+      - Observability: observability.md
+      - Secrets: secrets.md
+  - Access and auth gate: access-and-auth.md
+  - Demo runbook (Coder employees): demo-runbook.md

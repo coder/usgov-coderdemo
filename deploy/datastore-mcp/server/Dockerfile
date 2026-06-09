@@ -1,0 +1,15 @@
+# Multi-stage build for the datastore MCP server. Produces a tiny static
+# image suitable for the air-gapped ECR mirror (no Node, no shell).
+FROM golang:1.26-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -trimpath -ldflags="-s -w" -o /datastore-mcp .
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /datastore-mcp /datastore-mcp
+EXPOSE 8000
+USER nonroot:nonroot
+ENTRYPOINT ["/datastore-mcp"]

@@ -4,6 +4,25 @@ GovCloud Coder demo environment — agent swarm docs + infrastructure (see [PLAN
 
 **Region:** `us-gov-west-1` | **Domain:** `usgov.coderdemo.io`
 
+## Current state (2026-06-09)
+
+Applied live and pushed on branch `ws-2x/phase2` (DRAFT PR #38); see
+[STATUS.md](STATUS.md) for detail.
+
+- Coder control plane **v2.34.1** (Bedrock SigV4 proxy-header fix, backport #26053).
+- AI Gateway providers enabled: `anthropic` (direct), `openai` (direct), and
+  `anthropic-bedrock` (GovCloud IRSA, `us-gov-west-1`, Sonnet 4.5); Bedrock
+  verified HTTP 200.
+- Coder Agents model picker curated to 4 enabled models (effort `high` plus
+  estimated cost, USD per 1M in/out): Opus 4.8 15/75, Sonnet 4.6 (default) 3/15,
+  GPT 5.5 1.25/10, Sonnet 4.5 (Bedrock) 3/15.
+- Read-only `datastore` MCP server registered for Coder Agents; the deprecated
+  gateway-injected MCP was removed.
+- GitLab MCP dropped (CODAGT-570): Coder v2.34.1 cannot connect to GitLab
+  `/api/v4/mcp`.
+- Coder Agents chat spend-limits configured (default $500/mo, groups $100/$250,
+  user $50).
+
 ## Pre-requisites (human, first)
 
 1. [docs/PRE-REQUISITES.md](docs/PRE-REQUISITES.md) — workspace layout, env, reference clone URLs

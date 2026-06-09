@@ -1,0 +1,133 @@
+# oauth2-proxy: the OIDC auth gate for the docs site.
+#
+# Runs in auth-only mode (upstream static://200): ingress-nginx calls
+# /oauth2/auth as a subrequest for every request to the site, and oauth2-proxy
+# answers 202 (authenticated) or 401 (redirect to Keycloak). It also serves the
+# browser-facing /oauth2/start and /oauth2/callback endpoints via the
+# envdocs-oauth2 Ingress.
+#
+# Gate policy: any authenticated user in Keycloak realm `coder` is allowed
+# (email_domains=*), no group restriction. The OIDC client `envdocs` and the
+# cookie secret come from the envdocs-oauth Secret (synced by ESO from ASM).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth2-proxy
+  namespace: envdocs
+  labels:
+    app.kubernetes.io/name: oauth2-proxy
+    app.kubernetes.io/part-of: usgov-coderdemo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: oauth2-proxy
+        app.kubernetes.io/part-of: usgov-coderdemo
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: oauth2-proxy
+          image: 430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/quay/oauth2-proxy/oauth2-proxy:v7.7.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 4180
+          env:
+            - name: OAUTH2_PROXY_PROVIDER
+              value: "oidc"
+            - name: OAUTH2_PROXY_OIDC_ISSUER_URL
+              value: "https://auth.usgov.coderdemo.io/realms/coder"
+            - name: OAUTH2_PROXY_CLIENT_ID
+              value: "envdocs"
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: envdocs-oauth
+                  key: client-secret
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: envdocs-oauth
+                  key: cookie-secret
+            - name: OAUTH2_PROXY_REDIRECT_URL
+              value: "https://envdocs.usgov.coderdemo.io/oauth2/callback"
+            # Allow ANY authenticated realm user (no group restriction).
+            - name: OAUTH2_PROXY_EMAIL_DOMAINS
+              value: "*"
+            - name: OAUTH2_PROXY_SCOPE
+              value: "openid email profile"
+            # Keycloak client envdocs has pkce.code.challenge.method=S256, so
+            # the realm requires PKCE on the authorization code flow. oauth2-proxy
+            # does not send a code_challenge unless this is set, which otherwise
+            # makes Keycloak reject the flow with invalid_request.
+            - name: OAUTH2_PROXY_CODE_CHALLENGE_METHOD
+              value: "S256"
+            - name: OAUTH2_PROXY_HTTP_ADDRESS
+              value: "0.0.0.0:4180"
+            # Trust X-Forwarded-* from ingress-nginx; serve as the auth backend.
+            - name: OAUTH2_PROXY_REVERSE_PROXY
+              value: "true"
+            # Auth-only: content is served by the nginx backend, not proxied here.
+            - name: OAUTH2_PROXY_UPSTREAMS
+              value: "static://200"
+            # Skip the interstitial sign-in page; go straight to Keycloak.
+            - name: OAUTH2_PROXY_SKIP_PROVIDER_BUTTON
+              value: "true"
+            - name: OAUTH2_PROXY_COOKIE_SECURE
+              value: "true"
+            - name: OAUTH2_PROXY_COOKIE_DOMAINS
+              value: "envdocs.usgov.coderdemo.io"
+            - name: OAUTH2_PROXY_WHITELIST_DOMAINS
+              value: "envdocs.usgov.coderdemo.io"
+            - name: OAUTH2_PROXY_SET_XAUTHREQUEST
+              value: "true"
+            - name: OAUTH2_PROXY_PASS_USER_HEADERS
+              value: "true"
+            # Realm persona emails are set + verified; this keeps the gate working
+            # even if a future realm user has emailVerified=false.
+            - name: OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL
+              value: "true"
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oauth2-proxy
+  namespace: envdocs
+  labels:
+    app.kubernetes.io/name: oauth2-proxy
+    app.kubernetes.io/part-of: usgov-coderdemo
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: oauth2-proxy
+  ports:
+    - name: http
+      port: 4180
+      targetPort: http
