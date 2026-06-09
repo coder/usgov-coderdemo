@@ -70,29 +70,29 @@ MICROS_PER_DOLLAR = 1_000_000
 # anyone NOT caught by a tighter group/user override is effectively
 # unconstrained for the demo.
 GLOBAL_DEFAULT = {
-    "spend_limit_micros": 100_000_000,  # $100
+    "spend_limit_micros": 500_000_000,  # $500
     "period": "month",
 }
 
 # (label, group_uuid, spend_limit_micros)
 GROUP_OVERRIDES = [
-    ("alpha / developers", "0783bd37-fe80-4e61-86d7-bf9333d62d9c", 10_000_000),   # $10
-    ("bravo / Everyone",   "4565f1c6-f1de-4e20-bb7e-a171e1046a59", 25_000_000),   # $25 (org-wide)
+    ("alpha / developers", "0783bd37-fe80-4e61-86d7-bf9333d62d9c", 100_000_000),  # $100
+    ("bravo / Everyone",   "4565f1c6-f1de-4e20-bb7e-a171e1046a59", 250_000_000),  # $250 (org-wide)
 ]
 
 # (label, user_uuid, spend_limit_micros)
 USER_OVERRIDES = [
-    ("patrickplatform", "289f3ef0-d69a-45ac-b96b-93366543e513", 5_000_000),       # $5
+    ("patrickplatform", "289f3ef0-d69a-45ac-b96b-93366543e513", 50_000_000),      # $50
 ]
 
 # Sample users whose EFFECTIVE limit we surface in --show (read via
 # cost/{user}/summary.usage_limit). Chosen to exercise each tier:
-#   patrickplatform -> user override ($5)
-#   danadev         -> alpha/developers group ($10)
-#   austenplatform  -> bravo/Everyone group ($25); also an alpha member
-#   admin           -> bravo/Everyone group ($25); in all three orgs
-# Note: with these tiers no sample user resolves to the bare $100 default,
-# because admin and austen are bravo org members (bravo Everyone == $25).
+#   patrickplatform -> user override ($50)
+#   danadev         -> alpha/developers group ($100)
+#   austenplatform  -> bravo/Everyone group ($250); also an alpha member
+#   admin           -> bravo/Everyone group ($250); in all three orgs
+# Note: with these tiers no sample user resolves to the bare $500 default,
+# because admin and austen are bravo org members (bravo Everyone == $250).
 SAMPLE_USERS = [
     ("admin",           "3ebd62f0-7863-4521-ba98-bb3e5423f2e6"),
     ("austenplatform",  "7e77e572-6658-41e8-a4a2-bd565c116e24"),
