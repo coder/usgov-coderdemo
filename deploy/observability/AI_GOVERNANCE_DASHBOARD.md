@@ -135,13 +135,14 @@ traffic flows; this is expected, not an error:
   `aibridge_user_prompts` / `aibridge_tool_usages` yet).
 - **Firewall Sessions** (stat and table) read 0 (no rows in `boundary_sessions`
   yet).
-- The Agent Firewall log stream currently carries only Boundary proxy lifecycle
-  lines. The upstream `coder/observability` boundary dashboard parses
-  `boundary_request` allow / deny audit events from the `coderd.agentrpc`
-  logger; those events are not emitted in this stack until egress traffic is
-  audited, so allow / deny breakdown panels are intentionally not included here
-  yet. They become populatable once Boundary audits real egress (and would also
-  benefit from a newer Coder that logs `boundary_request`).
+- The Agent Firewall log stream (namespace `coder-workspaces`) carries Boundary
+  proxy lifecycle lines. The allow / deny audit breakdown is driven separately
+  by coderd's structured `boundary_request` log lines (namespace `coder`),
+  which Loki ingests as JSON with the audit fields nested under `fields`. The
+  Agent Firewall dashboard parses them with the LogQL `json` parser
+  (`fields.decision`, `fields.owner`, `fields.http_url`, and related fields),
+  so the **Egress Audit (allow / deny)** panels show live data while the
+  firewalled workspaces generate egress.
 
 Panels that already have data: provider health and inventory, total
 interceptions, active sessions, unique users, interceptions by provider / model /
