@@ -1,0 +1,30 @@
+# gitleaks configuration for usgov-coderdemo.
+#
+# Convention: no secrets in git. Real secrets live in AWS Secrets Manager
+# under usgov-coderdemo/* and are synced into Kubernetes by the External
+# Secrets Operator (ESO) via IRSA. Files committed here should only ever
+# contain placeholders.
+
+[extend]
+# Start from gitleaks' built-in rule set, then narrow with the allowlist below.
+useDefault = true
+
+[allowlist]
+description = "Allowlist for placeholder docs and synthetic demo fixtures"
+
+# Example and template files carry placeholders only, never real secrets.
+# The docs/ tree is prose and uses placeholders like <AWS_ACCOUNT_ID>.
+paths = [
+  '''.*\.example\..*''',
+  '''.*secrets\.example\.ya?ml''',
+  '''docs/.*''',
+]
+
+# Synthetic in-cluster demo Postgres credentials. These are not real secrets;
+# they back a throwaway demo Postgres instance and are being removed in branch
+# chore/datastore-mcp-eso-secrets. Delete this regexes entry once that PR
+# merges into main.
+regexes = [
+  '''demo_pg_admin_pw''',
+  '''mcp_ro_demo_pw''',
+]

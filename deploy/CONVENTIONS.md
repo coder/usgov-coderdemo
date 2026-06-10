@@ -111,3 +111,12 @@ Verify exact env var / values schema against
 | `deploy/gitlab/` | GitLab single-container + Ingress |
 | `coder-templates/claude-code/` | Workspace template (Coder Agents + Claude Code) |
 | `deploy/platform/` , `scripts/images.txt` | Orchestrator (do not edit) |
+
+## Secrets management
+
+No plaintext secrets in git. Real secrets live in AWS Secrets Manager under
+`usgov-coderdemo/*` and are synced into Kubernetes by the External Secrets
+Operator (ESO) via IRSA. The `*.example.yaml` files carry only placeholders,
+never real values. Secret scanning runs through gitleaks both in pre-commit
+(opt-in via `pre-commit install`) and in CI on every pull request and push to
+`main`.
