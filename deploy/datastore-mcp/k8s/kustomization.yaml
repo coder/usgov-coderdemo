@@ -6,22 +6,19 @@ resources:
   - namespace.yaml
   - demo-db.yaml
   - mcp-server.yaml
+  - externalsecrets.yaml
 
+# The demo Postgres holds UNCLASSIFIED synthetic data and is not reachable
+# outside the cluster. Its credentials are NOT stored in git: they live in AWS
+# Secrets Manager (usgov-coderdemo/datastore-mcp/db) and are synced into the
+# demo-db-secret and datastore-mcp-secret Kubernetes Secrets by ESO (see
+# externalsecrets.yaml). seed.sql creates the mcp_ro role with no literal
+# password; zz-set-mcp-ro-password.sh then sets it from the synced secret.
 configMapGenerator:
   - name: demo-db-seed
     files:
       - seed.sql
-
-# Synthetic demo credentials only. The demo Postgres holds UNCLASSIFIED
-# synthetic data and is not reachable outside the cluster. The mcp_ro role
-# and its password are defined in seed.sql; DATABASE_URI must match.
-secretGenerator:
-  - name: demo-db-secret
-    literals:
-      - POSTGRES_PASSWORD=demo_pg_admin_pw
-  - name: datastore-mcp-secret
-    literals:
-      - DATABASE_URI=postgres://mcp_ro:mcp_ro_demo_pw@demo-db.coder-demo-mcp.svc.cluster.local:5432/demo?sslmode=disable
+      - zz-set-mcp-ro-password.sh
 
 generatorOptions:
   disableNameSuffixHash: true
