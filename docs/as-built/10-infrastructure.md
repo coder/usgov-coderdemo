@@ -9,10 +9,10 @@ grounded in a repo file or a read-only command run against the live account on
 | Fact | Value | Source |
 |---|---|---|
 | Partition | `aws-us-gov` | `terraform/providers.tf`, `versions.lock.yaml` |
-| Account | `430737322961` | `.substrate-outputs.json`, live `aws sts`/IAM ARNs |
+| Account | `<AWS_ACCOUNT_ID>` | `.substrate-outputs.json`, live `aws sts`/IAM ARNs |
 | Region | `us-gov-west-1` | `terraform/variables.tf` (`region`), `versions.lock.yaml` |
 | Public domain | `usgov.coderdemo.io` | `terraform/variables.tf` (`domain`), `versions.lock.yaml` |
-| Terraform state backend | S3 `usgov-coderdemo-tfstate-430737322961`, DynamoDB lock `usgov-coderdemo-tflock`, encrypted | `terraform/backend.tf` |
+| Terraform state backend | S3 `usgov-coderdemo-tfstate-<AWS_ACCOUNT_ID>`, DynamoDB lock `usgov-coderdemo-tflock`, encrypted | `terraform/backend.tf` |
 
 The backend S3 bucket and DynamoDB table are referenced by `backend.tf` but are
 not declared in this Terraform; they are bootstrap inputs created out of band.
@@ -33,13 +33,13 @@ not declared in this Terraform; they are bootstrap inputs created out of band.
 | Cluster addons | `vpc-cni`, `kube-proxy`, `coredns`, `aws-ebs-csi-driver` | live `aws eks list-addons` |
 | EBS CSI IRSA role | `usgov-coderdemo-ebs-csi` (`AmazonEBSCSIDriverPolicy`) | live IAM; `deploy/platform/README.md` |
 | Coder Bedrock IRSA role | `usgov-coderdemo-coder-bedrock`, inline policy `bedrock-invoke` | `terraform/irsa.tf`; live IAM |
-| OIDC provider (IRSA) | `arn:aws-us-gov:iam::430737322961:oidc-provider/oidc.eks.us-gov-west-1.amazonaws.com/id/E9DB9E591C95ECB91F44EDCF38F146F2` | `terraform/irsa.tf`; `.substrate-outputs.json` |
+| OIDC provider (IRSA) | `arn:aws-us-gov:iam::<AWS_ACCOUNT_ID>:oidc-provider/oidc.eks.us-gov-west-1.amazonaws.com/id/E9DB9E591C95ECB91F44EDCF38F146F2` | `terraform/irsa.tf`; `.substrate-outputs.json` |
 | RDS instance | `usgov-coderdemo-pg`, PostgreSQL `18.4`, `db.m6g.large`, Multi-AZ, 50Gi gp3 encrypted, private | `terraform/rds.tf`; live `aws rds describe-db-instances` |
 | RDS endpoint | `usgov-coderdemo-pg.crhk7w9eko3r.us-gov-west-1.rds.amazonaws.com:5432` | `.substrate-outputs.json`; live RDS |
 | RDS security group | `sg-0f80f84106ca6502e`, ingress tcp/5432 from `10.0.0.0/16` | `terraform/rds.tf`; live RDS |
 | RDS master secret | Secrets Manager `usgov-coderdemo/rds/master` (user `dbadmin`) | `terraform/rds.tf`; `.substrate-outputs.json` |
-| ECR registry | `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com` | `.substrate-outputs.json`; `terraform/outputs.tf` |
-| ACM certificate | `arn:aws-us-gov:acm:us-gov-west-1:430737322961:certificate/7f4fc566-8efd-4aa5-b6ba-3b0c9a535d12` (`*.usgov.coderdemo.io` + apex) | `versions.lock.yaml`; `deploy/platform/ingress-nginx-values.yaml` |
+| ECR registry | `<AWS_ACCOUNT_ID>.dkr.ecr.us-gov-west-1.amazonaws.com` | `.substrate-outputs.json`; `terraform/outputs.tf` |
+| ACM certificate | `arn:aws-us-gov:acm:us-gov-west-1:<AWS_ACCOUNT_ID>:certificate/7f4fc566-8efd-4aa5-b6ba-3b0c9a535d12` (`*.usgov.coderdemo.io` + apex) | `versions.lock.yaml`; `deploy/platform/ingress-nginx-values.yaml` |
 | Route53 zone | `Z06701704WFETYIRU5C8` (`usgov.coderdemo.io`) | `terraform/variables.tf`; live `aws route53` |
 | Edge NLB (live) | internet-facing NLB `k8s-istiosys-istioing-bf7bdca8c8-866d61e8e6f9204f.elb.us-gov-west-1.amazonaws.com` (Istio ingress gateway; all Route53 records alias here) | live `kubectl`/`aws elbv2`/`aws route53` |
 | Ingress NLB (rollback) | internet-facing NLB `k8s-ingressn-ingressn-e16fe3cd33-c002102481951644.elb.us-gov-west-1.amazonaws.com` (ingress-nginx; out of the DNS path, kept for rollback, issue #34) | live `kubectl`/`aws elbv2` |
@@ -146,7 +146,7 @@ Inline policy `bedrock-invoke`, exact live actions and resources from
 - Resources:
   - `arn:aws-us-gov:bedrock:us-gov-west-1::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0`
   - `arn:aws-us-gov:bedrock:us-gov-west-1::foundation-model/amazon.nova-pro-v1:0`
-  - `arn:aws-us-gov:bedrock:us-gov-west-1:430737322961:inference-profile/us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0`
+  - `arn:aws-us-gov:bedrock:us-gov-west-1:<AWS_ACCOUNT_ID>:inference-profile/us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0`
   - `arn:aws-us-gov:bedrock:us-gov-east-1::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0`
 
 The `us-gov.` cross-region inference profile can route to both GovCloud
@@ -187,7 +187,7 @@ Terraform (`terraform/rds.tf`, output `rds_secret_arn`).
 
 ## ECR registry and image mirror
 
-Registry host: `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com`
+Registry host: `<AWS_ACCOUNT_ID>.dkr.ecr.us-gov-west-1.amazonaws.com`
 (`terraform/outputs.tf` is a derived value; the host is not a managed resource).
 GovCloud has no ECR pull-through cache, so images are mirrored with `crane` by
 `scripts/mirror-images.sh` reading `scripts/images.txt`. The script maps

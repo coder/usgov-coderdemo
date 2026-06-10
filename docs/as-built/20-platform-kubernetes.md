@@ -60,7 +60,7 @@ the LB controller (not the in-tree provider) via
 | `aws-load-balancer-scheme` | `internet-facing` |
 | `aws-load-balancer-nlb-target-type` | `ip` |
 | `aws-load-balancer-backend-protocol` | `tcp` |
-| `aws-load-balancer-ssl-cert` | `arn:aws-us-gov:acm:us-gov-west-1:430737322961:certificate/7f4fc566-8efd-4aa5-b6ba-3b0c9a535d12` |
+| `aws-load-balancer-ssl-cert` | `arn:aws-us-gov:acm:us-gov-west-1:<AWS_ACCOUNT_ID>:certificate/7f4fc566-8efd-4aa5-b6ba-3b0c9a535d12` |
 | `aws-load-balancer-ssl-ports` | `443` |
 | `aws-load-balancer-cross-zone-load-balancing-enabled` | `true` |
 
@@ -157,7 +157,7 @@ imperatively (`deploy/platform/README.md`, `deploy/keycloak/README.md`,
 The Helm chart creates ServiceAccount `coder` in the `coder` namespace and
 annotates it for IRSA. Live annotation (`kubectl get sa coder -n coder`):
 `eks.amazonaws.com/role-arn:
-arn:aws-us-gov:iam::430737322961:role/usgov-coderdemo-coder-bedrock`. This is
+arn:aws-us-gov:iam::<AWS_ACCOUNT_ID>:role/usgov-coderdemo-coder-bedrock`. This is
 how the AI Gateway Bedrock provider authenticates without static AWS keys
 (`deploy/coder/values.yaml`; the role and policy are documented in
 `docs/as-built/10-infrastructure.md`).

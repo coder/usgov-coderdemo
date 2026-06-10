@@ -10,7 +10,7 @@ Companion: issue [#30](https://github.com/coder/usgov-coderdemo/issues/30).
 Apply-ready manifests: [`deploy/istio/`](../../deploy/istio/README.md).
 
 Facts grounded in read-only checks run on 2026-06-07 against cluster
-`usgov-coderdemo` (account `430737322961`, `aws-us-gov`, `us-gov-west-1`):
+`usgov-coderdemo` (account `<AWS_ACCOUNT_ID>`, `aws-us-gov`, `us-gov-west-1`):
 
 | Fact | Value | Source |
 |---|---|---|

@@ -2,7 +2,7 @@
 
 Status: PLAN (design only). No cluster, AWS, Coder, or Keycloak changes were
 made to produce this document. Every AWS availability claim below is grounded in
-a read-only `aws` call run on 2026-06-07 against account `430737322961`,
+a read-only `aws` call run on 2026-06-07 against account `<AWS_ACCOUNT_ID>`,
 partition `aws-us-gov`, region `us-gov-west-1`. Items that could not be fully
 verified are marked "unverified" or "to verify".
 
@@ -20,9 +20,9 @@ into. It covers two pipelines:
 
 | Fact | Value | Source |
 |---|---|---|
-| Account / partition / region | `430737322961` / `aws-us-gov` / `us-gov-west-1` | `.substrate-outputs.json`, live `aws sts get-caller-identity` |
+| Account / partition / region | `<AWS_ACCOUNT_ID>` / `aws-us-gov` / `us-gov-west-1` | `.substrate-outputs.json`, live `aws sts get-caller-identity` |
 | EKS cluster | `usgov-coderdemo`, k8s 1.36, standard (not Auto Mode), `authenticationMode=API` | live `aws eks describe-cluster` |
-| EKS OIDC provider (IRSA) | `arn:aws-us-gov:iam::430737322961:oidc-provider/oidc.eks.us-gov-west-1.amazonaws.com/id/E9DB9E591C95ECB91F44EDCF38F146F2` | `.substrate-outputs.json`, `terraform/irsa.tf` |
+| EKS OIDC provider (IRSA) | `arn:aws-us-gov:iam::<AWS_ACCOUNT_ID>:oidc-provider/oidc.eks.us-gov-west-1.amazonaws.com/id/E9DB9E591C95ECB91F44EDCF38F146F2` | `.substrate-outputs.json`, `terraform/irsa.tf` |
 | OIDC issuer host | `oidc.eks.us-gov-west-1.amazonaws.com/id/E9DB9E591C95ECB91F44EDCF38F146F2` | `.substrate-outputs.json` |
 | Coder | v2.34.0, ns `coder`, served at `https://dev.usgov.coderdemo.io` | `docs/as-built/30-coder-control-plane.md` |
 | Coder metrics port (live) | `CODER_PROMETHEUS_ADDRESS=0.0.0.0:2112` already set on the Deployment | live `kubectl -n coder get deploy coder` |
@@ -273,7 +273,7 @@ config change, owner login, and repeated login failures.
 ## 7. IAM and IRSA requirements (least privilege)
 
 All roles trust the existing cluster OIDC provider
-(`arn:aws-us-gov:iam::430737322961:oidc-provider/oidc.eks.us-gov-west-1.amazonaws.com/id/E9DB9E591C95ECB91F44EDCF38F146F2`)
+(`arn:aws-us-gov:iam::<AWS_ACCOUNT_ID>:oidc-provider/oidc.eks.us-gov-west-1.amazonaws.com/id/E9DB9E591C95ECB91F44EDCF38F146F2`)
 with `aud = sts.amazonaws.com` and a `sub` pinned to the exact service account,
 exactly like `terraform/irsa.tf`. EKS Pod Identity is an available alternative
 (addon present) if the team prefers it over IRSA.
@@ -282,7 +282,7 @@ exactly like `terraform/irsa.tf`. EKS Pod Identity is an available alternative
 
 - Trust `sub = system:serviceaccount:observability:adot-collector`.
 - Policy: `aps:RemoteWrite` on
-  `arn:aws-us-gov:aps:us-gov-west-1:430737322961:workspace/<AMP_WS_ID>`.
+  `arn:aws-us-gov:aps:us-gov-west-1:<AWS_ACCOUNT_ID>:workspace/<AMP_WS_ID>`.
 
 ### 7.2 Fluent Bit role `usgov-coderdemo-fluentbit-cwl`
 
@@ -290,7 +290,7 @@ exactly like `terraform/irsa.tf`. EKS Pod Identity is an available alternative
 - Policy: `logs:CreateLogStream`, `logs:PutLogEvents`,
   `logs:DescribeLogStreams`, `logs:PutRetentionPolicy`, and
   `logs:CreateLogGroup` (scoped to
-  `arn:aws-us-gov:logs:us-gov-west-1:430737322961:log-group:/coder/audit:*`).
+  `arn:aws-us-gov:logs:us-gov-west-1:<AWS_ACCOUNT_ID>:log-group:/coder/audit:*`).
 
 ### 7.3 Firehose service role `usgov-coderdemo-firehose-audit`
 

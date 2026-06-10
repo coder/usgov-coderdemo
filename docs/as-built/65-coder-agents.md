@@ -32,9 +32,9 @@ returns three enabled providers (`anthropic`, `openai`, `anthropic-bedrock`);
 desired-state source of truth is `deploy/coder/ai-providers.yaml` (providers and
 model presets) and `scripts/demo-chat-spend-limits.py` (spend limits).
 
-## Curated model picker (4 enabled models)
+## Curated model picker (5 enabled models)
 
-The picker is curated to exactly four enabled models, each with reasoning effort
+The picker is curated to exactly five enabled models, each with reasoning effort
 `high` and an estimated per-model cost (USD per 1M tokens, input / output). The
 costs are representative public list prices for the matching tier; these are
 demo model names and are not billed. They feed the spend-limit accounting below
@@ -42,12 +42,20 @@ demo model names and are not billed. They feed the spend-limit accounting below
 pricing). Source of truth: `deploy/coder/ai-providers.yaml`, reconciled via
 `scripts/reconcile-ai-providers.py`.
 
-| Picker name | Provider | Model id | Effort | In / Out |
-|---|---|---|---|---|
-| Opus 4.8 (Anthropic Direct) | `anthropic` (direct) | `claude-opus-4-8` | high | 15 / 75 |
-| Sonnet 4.6 (Anthropic Direct) **default** | `anthropic` (direct) | `claude-sonnet-4-6` | high | 3 / 15 |
-| GPT 5.5 (OpenAI Direct) | `openai` (direct) | `gpt-5.5` | high | 1.25 / 10 |
-| Sonnet 4.5 (GovCloud Bedrock) | `anthropic-bedrock` (IRSA) | `us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0` | high | 3 / 15 |
+| Picker name | Provider | Model id | Effort | Context | In / Out |
+|---|---|---|---|---|---|
+| Sonnet 4.6 (Anthropic Direct) **default** | `anthropic` (direct) | `claude-sonnet-4-6` | high | 1,000,000 | 3 / 15 |
+| Opus 4.8 (Anthropic Direct) | `anthropic` (direct) | `claude-opus-4-8` | high | 1,000,000 | 15 / 75 |
+| Fable 5 (Anthropic Direct) | `anthropic` (direct) | `claude-fable-5` | high | 1,000,000 | 10 / 50 |
+| GPT 5.5 (OpenAI Direct) | `openai` (direct) | `gpt-5.5` | high | 400,000 | 1.25 / 10 |
+| Sonnet 4.5 (GovCloud Bedrock) | `anthropic-bedrock` (IRSA) | `us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0` | high | 200,000 | 3 / 15 |
+
+Fable 5 (Anthropic Direct) was added 2026-06-10 ($10/M in, $50/M out, effort
+`high`). The three Anthropic-direct models (Sonnet 4.6, Opus 4.8, Fable 5) were
+bumped from a 200,000-token to a 1,000,000-token context window, verified
+against the Anthropic Models API `max_input_tokens`. GPT 5.5 stays at 400,000;
+the GovCloud Bedrock Sonnet 4.5 stays at 200,000 because a 1M window is not
+confirmed on GovCloud Bedrock.
 
 All other model presets in `ai-providers.yaml` are disabled, so re-enabling any
 of them is a one-line flip. Sonnet 4.6 (Anthropic Direct) is the demo default.
@@ -71,7 +79,13 @@ access from the control-plane chat.
   in namespace `coder-demo-mcp`. It connects as a least-privilege role, permits
   a single `SELECT`/`WITH` per `query` in a read-only transaction, and exposes
   `list_tables`, `describe_table`, and `query`. Image built into private ECR
-  (`usgov/datastore-mcp`), not an upstream mirror.
+  (`usgov/datastore-mcp:0.1.1`, digest
+  `sha256:ad955f8361716785a30e4f516d4818cc5ea3c22130e3a8fe52987e433a78faf1`), not
+  an upstream mirror. The `0.1.1` rebuild folds three Dependabot security bumps:
+  github.com/jackc/pgx/v5 5.7.6 to 5.9.2 (SQL-injection fix GHSA-j88v-2chj-qfwx),
+  github.com/buger/jsonparser 1.1.1 to 1.1.2, and golang.org/x/crypto 0.37.0 to
+  0.45.0. The server stays read-only with `auth_type none`; adding auth
+  (recommended `user_oidc`/Keycloak) is tracked in issue #45.
 - **Deprecated path removed.** The earlier gateway-injected MCP mechanism
   (`CODER_AI_GATEWAY_INJECT_CODER_MCP_TOOLS` plus a `datastore` External Auth
   provider) was removed from `deploy/coder/values.yaml`. The supported Coder

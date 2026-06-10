@@ -36,7 +36,7 @@ security posture of `ai-agent-generic`. Shared invariants live in
 | `ai-agent-generic` | Generic agent runtime: plain compute, no LLM tooling. Default for server-side Coder Agents tasks not language-specific. | ECR `enterprise-base` | hardened: no sudo, `no_new_privs` |
 
 Base image today is the only mirrored workspace base:
-`430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/codercom/enterprise-base:ubuntu-noble-20260601`.
+`<AWS_ACCOUNT_ID>.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/codercom/enterprise-base:ubuntu-noble-20260601`.
 Toolchains are provisioned best-effort at startup (tolerant). Recommended
 production end state is a prebaked per-role image; see
 `docs/swarm/handoffs/WS-25-handoff.md` for the root mirror/build TODOs.

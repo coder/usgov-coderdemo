@@ -13,7 +13,7 @@ script: `scripts/demo-chat-spend-limits.py`.
    chats, enforced server-side. Spend is metered per message into
    `chat_messages.total_cost_micros`, computed from the per-model pricing on
    `chat_model_configs` (the input/output/cache prices per 1M tokens we already
-   set on the four enabled models). Admin-only endpoints under
+   set on the five enabled models). Admin-only endpoints under
    `/api/experimental/chats/usage-limits`.
 2. **AI Bridge budgets** (`/api/v2/.../ai/budget`). Non-functional scaffolding
    in this version: there is no enforcement and `/ai/budget` returns 404 on the

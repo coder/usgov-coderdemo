@@ -16,7 +16,7 @@ Keycloak runs as a single-replica `Deployment` in namespace `keycloak`
 
 | Aspect | Value | Source |
 |---|---|---|
-| Image | `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/quay/keycloak/keycloak:26.6.3` (ECR mirror of `quay.io/keycloak/keycloak:26.6.3`) | `deploy/keycloak/deployment.yaml` |
+| Image | `<AWS_ACCOUNT_ID>.dkr.ecr.us-gov-west-1.amazonaws.com/quay/keycloak/keycloak:26.6.3` (ECR mirror of `quay.io/keycloak/keycloak:26.6.3`) | `deploy/keycloak/deployment.yaml` |
 | Replicas | 1, `strategy.type: Recreate`, `KC_CACHE=local` (no clustering; HA out of scope) | `deploy/keycloak/deployment.yaml` |
 | Start command | `start --import-realm` (not `--optimized`; stock image is not pre-built for postgres, so plain `start` runs the build step on first boot) | `deploy/keycloak/deployment.yaml`, `deploy/keycloak/README.md` |
 | Database | RDS PostgreSQL, logical db `keycloak`, `KC_DB=postgres`, `KC_DB_URL=jdbc:postgresql://<rds-endpoint>:5432/keycloak`; credentials from Secret `keycloak-db` (keys `username`/`password`) | `deploy/keycloak/deployment.yaml` |
@@ -149,9 +149,14 @@ Configured in the Coder Helm values (`deploy/coder/values.yaml`, env block):
 | `CODER_OIDC_SIGN_IN_TEXT` | `Sign in with Keycloak` | login-button label |
 
 GitHub's built-in default login provider is disabled
-(`CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE=false`), so the dashboard login
-options are the local password owner plus "Sign in with Keycloak"
+(`CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE=false`), and built-in password
+auth is disabled (`CODER_DISABLE_PASSWORD_AUTH=true`), so the only dashboard
+login option is "Sign in with Keycloak"
 (`deploy/coder/values.yaml`, and `STATUS.md` "Auth boundary hardening").
+Password logins return HTTP 403 "Password authentication is disabled" for all
+users including owners. Break-glass if Keycloak/OIDC is unavailable:
+exec into the `coder` pod and run `coder server create-admin-user`, or set
+`CODER_DISABLE_PASSWORD_AUTH="false"` and `helm upgrade`.
 
 ### Login UX
 

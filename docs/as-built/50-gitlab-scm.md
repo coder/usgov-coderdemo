@@ -19,7 +19,7 @@ GitLab CE runs as a single-container Omnibus image in a one-replica
 
 | Aspect | Value | Source |
 |---|---|---|
-| Image | `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/gitlab/gitlab-ce:19.0.1-ce.0` (ECR mirror of `docker.io/gitlab/gitlab-ce:19.0.1-ce.0`) | `deploy/gitlab/statefulset.yaml` |
+| Image | `<AWS_ACCOUNT_ID>.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/gitlab/gitlab-ce:19.0.1-ce.0` (ECR mirror of `docker.io/gitlab/gitlab-ce:19.0.1-ce.0`) | `deploy/gitlab/statefulset.yaml` |
 | Workload | `StatefulSet`, `replicas: 1`, `serviceName: gitlab`, `OrderedReady`; chosen over a Deployment because the data volumes are RWO and two pods must never share them | `deploy/gitlab/statefulset.yaml` |
 | Database | EMBEDDED PostgreSQL bundled in the Omnibus image (the default), data under `/var/opt/gitlab/postgresql` on the `var-opt-gitlab` PVC. NOT the shared RDS instance | `deploy/gitlab/statefulset.yaml`, `deploy/gitlab/README.md` |
 | External URL | `external_url 'https://gitlab.usgov.coderdemo.io'`; bundled NGINX on plain HTTP `:80`, `listen_https=false`, `redirect_http_to_https=false`, forces `X-Forwarded-Proto=https` | `deploy/gitlab/statefulset.yaml` |

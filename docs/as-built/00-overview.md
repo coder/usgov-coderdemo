@@ -5,7 +5,7 @@ the environment **as it was actually built**, which differs in places from the
 original target design in [`docs/architecture/`](../architecture/). Those
 deviations are called out inline.
 
-- Region / account: `us-gov-west-1`, account `430737322961`, partition
+- Region / account: `us-gov-west-1`, account `<AWS_ACCOUNT_ID>`, partition
   `aws-us-gov`. Everything runs inside the GovCloud boundary.
 - Domain: `usgov.coderdemo.io`.
 - Coder version: `v2.34.1` (confirmed live via
@@ -69,7 +69,7 @@ the only model egress is the governed AI Gateway path.
 | CI / Registry | GitLab CI runner + GitLab Container Registry | ns `gitlab-runner`, ns `gitlab` | Non-meshed runner reaches GitLab/Coder over external URLs; registry served at `registry.usgov.coderdemo.io` via the Istio gateway to `gitlab.gitlab.svc:5050` (`deploy/gitlab-runner/`, `deploy/gitlab/virtualservice-registry.yaml`). |
 | Workspaces | Claude Code template pods | ns `coder-workspaces` | `enterprise-base` image, gp3 PVC, Claude Code + AgentAPI + code-server (`coder-templates/claude-code/main.tf`). |
 | Data | RDS PostgreSQL `18.4`, single instance | AWS | Databases `coder` and `keycloak`; `rds.force_ssl=1` (`deploy/CONVENTIONS.md`, `STATUS.md`). |
-| Registry | ECR `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com` | AWS | Mirrored images, no pull-through in GovCloud (`scripts/mirror-images.sh`). |
+| Registry | ECR `<AWS_ACCOUNT_ID>.dkr.ecr.us-gov-west-1.amazonaws.com` | AWS | Mirrored images, no pull-through in GovCloud (`scripts/mirror-images.sh`). |
 | AI egress | AI Gateway -> `api.anthropic.com` / `api.openai.com` via NAT; or Bedrock via IRSA | AWS | Providers `anthropic` and `openai` (direct) and `anthropic-bedrock` (Bedrock, GovCloud). |
 
 EKS detail: cluster `usgov-coderdemo`, k8s `1.36`, standard EKS (Auto Mode was
@@ -88,7 +88,7 @@ See `20`/`10` companion docs below.
 flowchart TB
   user([Demo user / browser])
 
-  subgraph gov [AWS GovCloud us-gov-west-1 / account 430737322961]
+  subgraph gov [AWS GovCloud us-gov-west-1 / account <AWS_ACCOUNT_ID>]
     r53[Route53 zone usgov.coderdemo.io]
     nlb[Istio gateway NLB<br/>ACM TLS *.usgov.coderdemo.io]
 
@@ -231,7 +231,7 @@ confirm exact names against the directory listing if a link does not resolve.
 | [`40-identity-keycloak.md`](40-identity-keycloak.md) | Keycloak realm `coder`, OIDC client, SSO config, identity gaps. |
 | [`50-gitlab-scm.md`](50-gitlab-scm.md) | In-boundary GitLab and the Coder git external-auth provider. |
 | `60-*.md` | AI Gateway / AI Bridge, DB-managed providers, Bedrock IRSA. |
-| [`65-coder-agents.md`](65-coder-agents.md) | Coder Agents control-plane chat: curated 4-model picker, datastore MCP server, chat spend-limits. |
+| [`65-coder-agents.md`](65-coder-agents.md) | Coder Agents control-plane chat: curated 5-model picker, datastore MCP server, chat spend-limits. |
 | `70-*.md` | `claude-code` workspace template, Coder Agents, Tasks, code-server. |
 | `80-*.md` | Additional layer (for example networking or security hardening); confirm topic in the directory. |
 | [`90-operations-runbook.md`](90-operations-runbook.md) | Day-2 operations: access, upgrades, template push, image mirroring, known gaps. |

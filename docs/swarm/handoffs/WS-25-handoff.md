@@ -81,7 +81,7 @@ Five new templates under `coder-templates/`, each with `main.tf`, `README.md`,
 | `ai-agent-generic` | Generic Agent Runtime | Generic agent runtime: plain compute, no LLM tooling. Default for server-side Coder Agents tasks not language-specific. | ECR `enterprise-base:ubuntu-noble-20260601` | disabled (`no_new_privs`) |
 
 Full base-image ref:
-`430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/codercom/enterprise-base:ubuntu-noble-20260601`.
+`<AWS_ACCOUNT_ID>.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/codercom/enterprise-base:ubuntu-noble-20260601`.
 
 ## Images root must mirror first
 

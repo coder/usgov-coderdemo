@@ -71,7 +71,7 @@ credential and it is scoped to the workspace owner.
 ## Bedrock IRSA credential chain
 
 1. **ServiceAccount annotation.** SA `coder/coder` is annotated
-   `eks.amazonaws.com/role-arn = arn:aws-us-gov:iam::430737322961:role/usgov-coderdemo-coder-bedrock`.
+   `eks.amazonaws.com/role-arn = arn:aws-us-gov:iam::<AWS_ACCOUNT_ID>:role/usgov-coderdemo-coder-bedrock`.
 2. **STS AssumeRoleWithWebIdentity.** The role trust policy allows the cluster
    OIDC provider, conditioned on `aud = sts.amazonaws.com` and
    `sub = system:serviceaccount:coder:coder`. The SDK uses the GovCloud regional

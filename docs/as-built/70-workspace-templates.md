@@ -34,7 +34,7 @@ The template provisions one Kubernetes pod and one PVC in namespace
   `wait_until_bound = false`. Source: `main.tf:345-368, 427-439`; StorageClass
   per the facts sheet.
 - **Image.** `var.workspace_image` defaults to the ECR-mirrored
-  `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/codercom/enterprise-base:ubuntu-noble-20260601`.
+  `<AWS_ACCOUNT_ID>.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/codercom/enterprise-base:ubuntu-noble-20260601`.
   `enterprise-base` runs as user `coder` (uid 1000) and ships git/curl/sudo;
   Claude Code and AgentAPI install as standalone binaries into
   `$HOME/.local/bin`, so no Node.js is needed in the base image.

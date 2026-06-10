@@ -26,7 +26,7 @@ and `deploy/istio/namespace-injection.md` (which namespaces join the mesh).
 Mutating steps (`istioctl install`, `kubectl apply`, namespace labeling and
 pod rollouts, the DNS cutover, and the PERMISSIVE-to-STRICT flip) were performed
 during this build against `./kubeconfig` and the `us-gov-west-1` account
-`430737322961`. Live checks here used read-only `istioctl proxy-status`,
+`<AWS_ACCOUNT_ID>`. Live checks here used read-only `istioctl proxy-status`,
 `kubectl get`, and authenticated/anonymous `curl` against the public hosts.
 Always target the demo hosts explicitly (`https://dev.usgov.coderdemo.io` and
 friends), never the ambient `CODER_URL`.
@@ -40,9 +40,9 @@ friends), never the ambient `CODER_URL`.
   `docker.io/istio/*` source maps through the existing `docker-hub/` prefix, so
   no `gcr.io` mapping change was needed. Mirrored via `scripts/images.txt` +
   `scripts/mirror-images.sh`:
-  - `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/istio/pilot:1.30.1` (istiod)
-  - `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/istio/proxyv2:1.30.1` (ingress gateway + sidecars)
-  - `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/istio/install-cni:1.30.1` (mirrored for a later CNI hardening pass; not enabled yet)
+  - `<AWS_ACCOUNT_ID>.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/istio/pilot:1.30.1` (istiod)
+  - `<AWS_ACCOUNT_ID>.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/istio/proxyv2:1.30.1` (ingress gateway + sidecars)
+  - `<AWS_ACCOUNT_ID>.dkr.ecr.us-gov-west-1.amazonaws.com/docker-hub/istio/install-cni:1.30.1` (mirrored for a later CNI hardening pass; not enabled yet)
 - `istioctl` 1.30.1 is installed in this workspace at `~/.local/bin/istioctl`,
   matching the control-plane version. Verified live: `istioctl version` reports
   client, control plane, and data plane all `1.30.1`.
