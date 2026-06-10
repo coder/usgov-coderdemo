@@ -1,0 +1,10 @@
+# Opt-in pre-commit hooks. Developers enable them locally with:
+#   pre-commit install
+#
+# This runs gitleaks before each commit so secrets are caught before they
+# ever land in git history. CI runs the same scanner as a backstop.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
