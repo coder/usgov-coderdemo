@@ -24,7 +24,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: datastore-mcp
-          image: "430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/usgov/datastore-mcp:0.1.0"
+          image: "430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/usgov/datastore-mcp:0.1.1"
           imagePullPolicy: IfNotPresent
           args: []
           env:
