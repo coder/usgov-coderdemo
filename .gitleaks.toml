@@ -19,12 +19,3 @@ paths = [
   '''.*secrets\.example\.ya?ml''',
   '''docs/.*''',
 ]
-
-# Synthetic in-cluster demo Postgres credentials. These are not real secrets;
-# they back a throwaway demo Postgres instance and are being removed in branch
-# chore/datastore-mcp-eso-secrets. Delete this regexes entry once that PR
-# merges into main.
-regexes = [
-  '''demo_pg_admin_pw''',
-  '''mcp_ro_demo_pw''',
-]
