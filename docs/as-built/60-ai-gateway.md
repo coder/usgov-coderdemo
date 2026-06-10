@@ -169,10 +169,13 @@ to a Bedrock id (`STATUS.md:76-79`).
 ## Coder Agents control-plane model picker
 
 The same `ai_providers` rows also back the Coder Agents control-plane chat. Its
-model picker (`GET /api/experimental/chats/models`) is curated to exactly four
+model picker (`GET /api/experimental/chats/models`) is curated to exactly five
 enabled models, each with reasoning effort `high` and an estimated per-model
-cost: Opus 4.8 (Anthropic Direct), Sonnet 4.6 (Anthropic Direct, the default),
-GPT 5.5 (OpenAI Direct), and Sonnet 4.5 (GovCloud Bedrock). Unlike the
+cost: Sonnet 4.6 (Anthropic Direct, the default), Opus 4.8 (Anthropic Direct),
+Fable 5 (Anthropic Direct), GPT 5.5 (OpenAI Direct), and Sonnet 4.5 (GovCloud
+Bedrock). The three Anthropic-direct models carry a 1,000,000-token context
+window; GPT 5.5 is 400,000 and the GovCloud Bedrock Sonnet 4.5 is 200,000.
+Unlike the
 in-workspace aibridge path (which Claude Code drives with a fixed
 `ANTHROPIC_BASE_URL`), the picker selects among providers and models per chat.
 The model presets, costs, and the spend-limit accounting they feed are detailed
@@ -210,7 +213,7 @@ chain resolves the IRSA web-identity token from the annotated service account.
 The chain, verified read-only:
 
 1. **ServiceAccount annotation.** SA `coder/coder` is annotated
-   `eks.amazonaws.com/role-arn = arn:aws-us-gov:iam::430737322961:role/usgov-coderdemo-coder-bedrock`.
+   `eks.amazonaws.com/role-arn = arn:aws-us-gov:iam::<AWS_ACCOUNT_ID>:role/usgov-coderdemo-coder-bedrock`.
    Verified: `kubectl -n coder get sa coder -o jsonpath`. Declared at
    `deploy/coder/values.yaml:32-37`.
 2. **STS AssumeRoleWithWebIdentity.** The role trust policy allows
@@ -229,7 +232,7 @@ The chain, verified read-only:
      (us-gov-west-1 and us-gov-east-1)
    - `foundation-model/amazon.nova-pro-v1:0` (us-gov-west-1)
    - `inference-profile/us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0`
-     (us-gov-west-1, account `430737322961`)
+     (us-gov-west-1, account `<AWS_ACCOUNT_ID>`)
 
    Verified: `aws iam get-role-policy --role-name usgov-coderdemo-coder-bedrock
    --policy-name bedrock-invoke`. This matches the expectation in the facts

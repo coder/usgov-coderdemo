@@ -101,3 +101,45 @@ applied live this session.
   docs/plans/chat-spend-limits.md.
 - decision: the AI Bridge /ai/budget path is non-functional scaffolding and is
   not used.
+
+### 2026-06-09: disable built-in Coder password auth (Keycloak-only login)
+- change: added `CODER_DISABLE_PASSWORD_AUTH=true` to `deploy/coder/values.yaml`
+  (helm release `coder` rev 12). The login UI now shows only "Sign in with
+  Keycloak"; `GET /api/v2/users/authmethods` reports `password.enabled=false`
+  and `oidc.enabled=true`, and `POST /api/v2/users/login` returns HTTP 403
+  "Password authentication is disabled" for all users including owners (v2.34.1
+  `coderd/userauth.go` blocks with no owner exception).
+- decision: the former bootstrap `admin` owner now signs in via Keycloak SSO;
+  automation uses a long-lived Coder API token (token auth is unaffected by the
+  flag). Break-glass if Keycloak/OIDC is unavailable:
+  exec into the `coder` pod and run `coder server create-admin-user`, or set
+  `CODER_DISABLE_PASSWORD_AUTH="false"` and `helm upgrade`.
+
+### 2026-06-10: add Claude Fable 5 and 1M context to the Coder Agents picker
+- change: added Fable 5 (Anthropic Direct, `claude-fable-5`, $10/M in, $50/M
+  out, effort high) to the curated picker, taking it from four to five enabled
+  models.
+- change: bumped the three Anthropic-direct models (Sonnet 4.6, Opus 4.8, Fable
+  5) from a 200,000-token to a 1,000,000-token context window, verified against
+  the Anthropic Models API `max_input_tokens`.
+- decision: GPT 5.5 stays at 400,000 and the GovCloud Bedrock Sonnet 4.5 stays
+  at 200,000, because a 1M window is not confirmed on GovCloud Bedrock.
+
+### 2026-06-10: bump the datastore MCP image to 0.1.1 (security deps)
+- change: rebuilt and redeployed the datastore MCP server from 0.1.0 to 0.1.1
+  (digest `sha256:ad955f8361716785a30e4f516d4818cc5ea3c22130e3a8fe52987e433a78faf1`),
+  folding three Dependabot security bumps: github.com/jackc/pgx/v5 5.7.6 to
+  5.9.2 (SQL-injection fix GHSA-j88v-2chj-qfwx), github.com/buger/jsonparser
+  1.1.1 to 1.1.2, and golang.org/x/crypto 0.37.0 to 0.45.0. Pushed to ECR
+  `usgov/datastore-mcp:0.1.1`, manifest tag bumped, rolled out live in namespace
+  `coder-demo-mcp`; verified `list_tables`/`describe_table`/`query`.
+- decision: the server remains read-only with `auth_type none`; adding auth
+  (recommended `user_oidc`/Keycloak) is tracked in issue #45.
+
+### 2026-06-10: redact the AWS account ID from docs/
+- change: replaced every occurrence of the live AWS account ID under `docs/`
+  with the placeholder `<AWS_ACCOUNT_ID>` (prose, ECR image URIs, and IAM role
+  ARNs).
+- decision: docs-only redaction; the real account ID stays in `deploy/`,
+  `terraform/`, `coder-templates/`, `scripts/`, and `STATUS.md`, where it is
+  functionally required.

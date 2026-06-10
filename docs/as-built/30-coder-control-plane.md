@@ -38,7 +38,7 @@ Always target `https://dev.usgov.coderdemo.io` explicitly; the ambient
 ```yaml
 coder:
   image:
-    repo: "430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/ghcr/coder/coder"
+    repo: "<AWS_ACCOUNT_ID>.dkr.ecr.us-gov-west-1.amazonaws.com/ghcr/coder/coder"
     tag: "v2.34.1"
     pullPolicy: IfNotPresent
 ```
@@ -49,7 +49,7 @@ GovCloud has no pull-through cache. The mirror path follows the convention
 (`deploy/CONVENTIONS.md:47-57`). The chart version is pinned to `2.34.1`
 (`deploy/coder/README.md:48-53`, `deploy/CONVENTIONS.md:39-45`). Source:
 `deploy/coder/values.yaml:18-26`. Verified live: the running Deployment uses
-`430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/ghcr/coder/coder:v2.34.1`.
+`<AWS_ACCOUNT_ID>.dkr.ecr.us-gov-west-1.amazonaws.com/ghcr/coder/coder:v2.34.1`.
 
 ## ServiceAccount and IRSA (Bedrock)
 
@@ -59,7 +59,7 @@ serviceAccount:
   workspacePerms: true
   enableDeployments: true
   annotations:
-    eks.amazonaws.com/role-arn: "arn:aws-us-gov:iam::430737322961:role/usgov-coderdemo-coder-bedrock"
+    eks.amazonaws.com/role-arn: "arn:aws-us-gov:iam::<AWS_ACCOUNT_ID>:role/usgov-coderdemo-coder-bedrock"
 ```
 
 The chart always creates a ServiceAccount named `coder`. It is annotated for
@@ -69,7 +69,7 @@ credentials and no static AWS keys. `workspacePerms: true` and
 Deployments. Source: `deploy/coder/values.yaml:28-37`.
 
 Verified live: the SA `coder/coder` carries the annotation
-`eks.amazonaws.com/role-arn = arn:aws-us-gov:iam::430737322961:role/usgov-coderdemo-coder-bedrock`
+`eks.amazonaws.com/role-arn = arn:aws-us-gov:iam::<AWS_ACCOUNT_ID>:role/usgov-coderdemo-coder-bedrock`
 (`kubectl -n coder get sa coder -o jsonpath`). The IRSA chain itself is
 documented in `60-ai-gateway.md`.
 
@@ -208,13 +208,14 @@ the facts sheet and STATUS notes).
 
 ## Auth boundary hardening
 
-Three settings keep all login and git egress inside the GovCloud boundary.
+Four settings keep all login and git egress inside the GovCloud boundary.
 
 1. **GitHub default login provider disabled.**
    `CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE=false`. Coder's built-in GitHub
    login uses Coder's hosted GitHub app and calls github.com, which is out of
-   boundary. Disabling it makes login Keycloak SSO plus the local password owner
-   only. Source: `deploy/coder/values.yaml:109-115`. Verified live:
+   boundary. Disabling it removes the github.com login path; combined with the
+   built-in password auth disable below, login is Keycloak SSO only. Source:
+   `deploy/coder/values.yaml:109-115`. Verified live:
    `deployment/config` `oauth2.github.default_provider_enable=false`.
 
 2. **GitLab git external auth (in-boundary SCM).**
@@ -238,6 +239,19 @@ Three settings keep all login and git egress inside the GovCloud boundary.
    hardened posture; every template here serves apps from its own subdomain.
    Source: `deploy/coder/values.yaml:150-157`. Verified live:
    `deployment/config` `disable_path_apps=true`.
+
+4. **Built-in password auth disabled.**
+   `CODER_DISABLE_PASSWORD_AUTH=true` (`deploy/coder/values.yaml`, helm release
+   `coder` rev 12). The login screen shows only "Sign in with Keycloak"; the
+   password form is gone. `GET /api/v2/users/authmethods` reports
+   `password.enabled=false` and `oidc.enabled=true`, and
+   `POST /api/v2/users/login` returns HTTP 403 "Password authentication is
+   disabled" for all users including owners (v2.34.1 `coderd/userauth.go` blocks
+   with no owner exception). The former bootstrap `admin` owner now signs in via
+   Keycloak SSO; automation uses a long-lived Coder API token (token auth is
+   unaffected by this flag). Break-glass if Keycloak/OIDC is unavailable:
+   exec into the `coder` pod and run `coder server create-admin-user`, or set
+   `CODER_DISABLE_PASSWORD_AUTH="false"` and `helm upgrade`.
 
 ## AI Gateway env (seed-once provider config)
 

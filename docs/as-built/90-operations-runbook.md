@@ -12,7 +12,7 @@ an unauthenticated `GET /`.
 
 | Service | URL | Live check | Notes |
 |---|---|---|---|
-| Coder | `https://dev.usgov.coderdemo.io` | `200` (`/api/v2/buildinfo` -> `v2.34.1+2e8d80a`) | Owner password login or "Sign in with Keycloak". |
+| Coder | `https://dev.usgov.coderdemo.io` | `200` (`/api/v2/buildinfo` -> `v2.34.1+2e8d80a`) | Keycloak SSO only (built-in password login disabled). |
 | Keycloak | `https://auth.usgov.coderdemo.io` | `302` (redirect to login) | Realm `coder`; admin console at `/admin`, master realm, user `admin`. |
 | GitLab | `https://gitlab.usgov.coderdemo.io` | `302` (redirect to login) | Root login; embedded Postgres. |
 | Kiali | `https://kiali.usgov.coderdemo.io/kiali` | Keycloak SSO (`/kiali/` -> `200`) | Istio mesh dashboard; OpenID login via realm `coder`, anonymous access disabled. |

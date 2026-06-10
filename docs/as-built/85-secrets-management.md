@@ -30,7 +30,7 @@ Kubernetes Secret (coder, keycloak, gitlab, gitlab-runner, monitoring, istio-sys
 | Piece | Detail |
 |---|---|
 | ESO | Helm chart `external-secrets` 2.6.0, ns `external-secrets` (controller + webhook + cert-controller, all 1/1). Image from the ECR mirror `ghcr/external-secrets/external-secrets:v2.6.0`. Values: `deploy/platform/external-secrets/values.yaml`. |
-| IRSA role | `usgov-coderdemo-external-secrets`. Trust: `system:serviceaccount:external-secrets:external-secrets`. Policy: `secretsmanager:GetSecretValue` + `DescribeSecret` on `arn:aws-us-gov:secretsmanager:us-gov-west-1:430737322961:secret:usgov-coderdemo/*` only. Codified in `terraform/secrets-hardening.tf`. |
+| IRSA role | `usgov-coderdemo-external-secrets`. Trust: `system:serviceaccount:external-secrets:external-secrets`. Policy: `secretsmanager:GetSecretValue` + `DescribeSecret` on `arn:aws-us-gov:secretsmanager:us-gov-west-1:<AWS_ACCOUNT_ID>:secret:usgov-coderdemo/*` only. Codified in `terraform/secrets-hardening.tf`. |
 | Store | `ClusterSecretStore/aws-secretsmanager` (AWS SecretsManager, region us-gov-west-1, `auth.jwt.serviceAccountRef` -> the ESO controller SA). Status `Valid`. |
 | ExternalSecrets | 14 total: 12 in `deploy/platform/external-secrets/secretstore-and-externalsecrets.yaml`, plus `deploy/istio/observability/externalsecret-kiali-oauth.yaml` (Istio mesh) and `deploy/gitlab-runner/externalsecret.yaml` (GitLab CI runners). Each `dataFrom.extract`, `creationPolicy: Owner`, `refreshInterval: 1h`. |
 

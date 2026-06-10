@@ -27,7 +27,7 @@ flowchart TB
 | Piece | Detail |
 |---|---|
 | ESO | Helm chart `external-secrets` 2.6.0, ns `external-secrets` (controller, webhook, cert-controller). Image from ECR mirror `ghcr/external-secrets/external-secrets:v2.6.0`. |
-| IRSA role | `usgov-coderdemo-external-secrets`. Policy: `secretsmanager:GetSecretValue` + `DescribeSecret` on `arn:aws-us-gov:secretsmanager:us-gov-west-1:430737322961:secret:usgov-coderdemo/*` only. |
+| IRSA role | `usgov-coderdemo-external-secrets`. Policy: `secretsmanager:GetSecretValue` + `DescribeSecret` on `arn:aws-us-gov:secretsmanager:us-gov-west-1:<AWS_ACCOUNT_ID>:secret:usgov-coderdemo/*` only. |
 | Store | `ClusterSecretStore/aws-secretsmanager`, region `us-gov-west-1`, `auth.jwt.serviceAccountRef` to the ESO controller SA. Status `Valid`. |
 | ExternalSecrets | Each `dataFrom.extract`, `creationPolicy: Owner`, `refreshInterval: 1h`. |
 

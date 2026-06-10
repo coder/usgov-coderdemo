@@ -81,8 +81,8 @@ Detail: [Observability](observability.md).
 
 Reinforce the hardening posture:
 
-- Coder's built-in GitHub login is disabled; login is Keycloak SSO plus a local
-  break-glass owner only.
+- Coder's built-in GitHub login is disabled, and built-in password auth is
+  disabled (`CODER_DISABLE_PASSWORD_AUTH=true`); login is Keycloak SSO only.
 - Path-based workspace apps are disabled; apps serve from their own
   `*.usgov.coderdemo.io` subdomains.
 - Secrets live in AWS Secrets Manager and sync via the External Secrets Operator

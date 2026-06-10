@@ -34,20 +34,20 @@ egress is the governed AI Gateway path.
 
 | Property | Value |
 |---|---|
-| Region / account | `us-gov-west-1`, account `430737322961`, partition `aws-us-gov` |
+| Region / account | `us-gov-west-1`, account `<AWS_ACCOUNT_ID>`, partition `aws-us-gov` |
 | Domain | `usgov.coderdemo.io` (Route53 zone `Z06701704WFETYIRU5C8`) |
 | Coder | `v2.34.0`, licensed with the AI Governance add-on plus premium |
 | Keycloak | `26.6.3`, realm `coder` |
 | GitLab | CE `19.0.1-ce.0`, embedded Postgres |
 | EKS | cluster `usgov-coderdemo`, Kubernetes `1.36`, 3x `m5.xlarge` node group `mng` |
 | Database | RDS PostgreSQL `18.4` (databases `coder` and `keycloak`), `rds.force_ssl=1` |
-| Registry | ECR `430737322961.dkr.ecr.us-gov-west-1.amazonaws.com` (mirrored images; no pull-through in GovCloud) |
+| Registry | ECR `<AWS_ACCOUNT_ID>.dkr.ecr.us-gov-west-1.amazonaws.com` (mirrored images; no pull-through in GovCloud) |
 
 ## Live URLs
 
 | Service | URL | Auth |
 |---|---|---|
-| Coder | `https://dev.usgov.coderdemo.io` | Local owner password or Keycloak SSO |
+| Coder | `https://dev.usgov.coderdemo.io` | Keycloak SSO only |
 | Keycloak | `https://auth.usgov.coderdemo.io` | Realm `coder`; admin console at `/admin` |
 | GitLab | `https://gitlab.usgov.coderdemo.io` | root password or Keycloak SSO |
 | Grafana | `https://grafana.usgov.coderdemo.io` | Keycloak SSO (group maps to org role) |

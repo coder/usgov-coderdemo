@@ -27,7 +27,7 @@ in `deploy/platform/external-secrets/secretstore-and-externalsecrets.yaml`.
 
 Mutating steps (helm install/upgrade, kubectl apply, one ASM
 `create-secret`) were performed during this build against `./kubeconfig` and the
-`us-gov-west-1` account `430737322961`. Live checks used read-only `kubectl get`,
+`us-gov-west-1` account `<AWS_ACCOUNT_ID>`. Live checks used read-only `kubectl get`,
 the Prometheus HTTP API over a `port-forward`, and authenticated calls to the
 public Grafana host. The Grafana admin password was read from the synced
 Kubernetes Secret and never printed. Always target

@@ -12,7 +12,7 @@ Source of truth: `docs/as-built/30-coder-control-plane.md`,
 ```yaml
 coder:
   image:
-    repo: "430737322961.dkr.ecr.us-gov-west-1.amazonaws.com/ghcr/coder/coder"
+    repo: "<AWS_ACCOUNT_ID>.dkr.ecr.us-gov-west-1.amazonaws.com/ghcr/coder/coder"
     tag: "v2.34.0"
     pullPolicy: IfNotPresent
 ```
@@ -28,7 +28,7 @@ serviceAccount:
   workspacePerms: true
   enableDeployments: true
   annotations:
-    eks.amazonaws.com/role-arn: "arn:aws-us-gov:iam::430737322961:role/usgov-coderdemo-coder-bedrock"
+    eks.amazonaws.com/role-arn: "arn:aws-us-gov:iam::<AWS_ACCOUNT_ID>:role/usgov-coderdemo-coder-bedrock"
 ```
 
 The `coder` ServiceAccount is annotated for IRSA so the AI Gateway Bedrock
@@ -95,8 +95,9 @@ identity is handled by runtime per-org IdP sync, not the legacy env vars. See
 Three settings keep all login and git egress inside the GovCloud boundary.
 
 1. **GitHub default login disabled.**
-   `CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE=false`. Login is Keycloak SSO
-   plus the local password owner only, with no github.com egress.
+   `CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE=false`, and built-in password
+   auth is disabled (`CODER_DISABLE_PASSWORD_AUTH=true`). Login is Keycloak SSO
+   only, with no github.com egress.
 2. **GitLab git external auth.** `CODER_EXTERNAL_AUTH_0_*` declares an explicit
    provider for the in-cluster GitLab (id `gitlab`, type `gitlab`). Declaring it
    also suppresses Coder's built-in github.com external-auth provider. See

@@ -1,7 +1,7 @@
 # Architecture
 
 The environment runs entirely inside the AWS GovCloud boundary
-(`us-gov-west-1`, account `430737322961`). Public traffic enters through
+(`us-gov-west-1`, account `<AWS_ACCOUNT_ID>`). Public traffic enters through
 Route53, terminates TLS at an NLB with the `*.usgov.coderdemo.io` ACM
 certificate, and reaches workloads on the EKS cluster `usgov-coderdemo`.
 
@@ -30,7 +30,7 @@ built from ingress-nginx external-auth annotations and oauth2-proxy. See
 flowchart TB
   user(["Demo user / browser"])
 
-  subgraph gov["AWS GovCloud us-gov-west-1 / account 430737322961"]
+  subgraph gov["AWS GovCloud us-gov-west-1 / account <AWS_ACCOUNT_ID>"]
     r53["Route53 zone usgov.coderdemo.io"]
     nlbI["Istio gateway NLB<br/>ACM *.usgov.coderdemo.io"]
     nlbN["ingress-nginx NLB<br/>ACM *.usgov.coderdemo.io"]
