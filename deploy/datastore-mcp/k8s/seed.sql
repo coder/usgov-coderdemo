@@ -101,7 +101,9 @@ INSERT INTO report_entities (report_id, entity_id) VALUES
 DO $$
 BEGIN
    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mcp_ro') THEN
-      CREATE ROLE mcp_ro LOGIN PASSWORD 'mcp_ro_demo_pw';
+-- No literal password in git. zz-set-mcp-ro-password.sh sets it from the
+-- ESO-synced MCP_RO_PASSWORD env after this seed runs.
+      CREATE ROLE mcp_ro LOGIN;
    END IF;
 END
 $$;

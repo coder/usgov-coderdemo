@@ -31,6 +31,11 @@ spec:
                 secretKeyRef:
                   name: demo-db-secret
                   key: POSTGRES_PASSWORD
+            - name: MCP_RO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: demo-db-secret
+                  key: MCP_RO_PASSWORD
             - name: PGDATA
               value: "/var/lib/postgresql/data/pgdata"
           ports:
