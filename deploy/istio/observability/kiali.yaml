@@ -14,7 +14,8 @@
 # is pulled from quay.io at runtime. Kiali reads the in-cluster kube-prometheus
 # Prometheus and links to the kube-prometheus Grafana. Auth is Keycloak OpenID
 # Connect SSO (realm "coder"); anonymous access is disabled. The OIDC client
-# secret arrives via ESO in the Secret "kiali" (externalsecret-kiali-oauth.yaml).
+# secret and the session signing key arrive via ESO in the Secret "kiali"
+# (externalsecret-kiali-oauth.yaml); no secret value is rendered into this file.
 # It serves under /kiali and is exposed through the Istio gateway by
 # virtualservice-kiali.yaml.
 ---
@@ -219,7 +220,7 @@ data:
         ignore:
         - KIA1301
     login_token:
-      signing_key: XzVbyI9aroe2OLWSxHIIqiVk2927ceKR
+      signing_key: secret:kiali:signing-key
     server:
       observability:
         metrics:
@@ -435,7 +436,7 @@ spec:
         app.kubernetes.io/part-of: "kiali"
         sidecar.istio.io/inject: "false"
       annotations:
-        checksum/config: f71d89d2a00e63daba53a0ef4efffa34ac80ebe832648b755c2a6bb48b5611a1
+        checksum/config: a8dd67cf8a07241a4e67be56b1541a8107ddd3a7c4362bf02b10f6eff2182bc1
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
         prometheus.io/scheme: "http"
@@ -514,6 +515,9 @@ spec:
         - name: "kiali-multi-cluster-secret"
           mountPath: "/kiali-remote-cluster-secrets/kiali-multi-cluster-secret"
           readOnly: true
+        - name: login-token-signing-key
+          mountPath: "/kiali-override-secrets/login-token-signing-key"
+          readOnly: true
         resources:
           limits:
             memory: 1Gi
@@ -540,4 +544,10 @@ spec:
         secret:
           secretName: "kiali-multi-cluster-secret"
           optional: true
+      - name: login-token-signing-key
+        secret:
+          secretName: kiali
+          items:
+          - key: signing-key
+            path: value.txt
 ...
