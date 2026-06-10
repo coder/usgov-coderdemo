@@ -62,8 +62,20 @@ deployment:
 # own ServiceAccount. deployment.view_only_mode true (above) keeps that shared
 # access read-only.
 #
-# The 32-byte login_token.signing_key the chart renders keeps Kiali on the
-# authorization-code flow, so the oidc-secret Secret is required.
+# Kiali signs its session token with a 32-byte signing key. A 16, 24, or 32
+# byte key keeps Kiali on the OIDC authorization-code flow (so the oidc-secret
+# Secret is required); a key of any other length silently downgrades to the
+# implicit flow. The key is sensitive, so it is NOT rendered into kiali.yaml.
+# Instead it is referenced as secret:<secretName>:<secretKey>: the chart mounts
+# the "signing-key" entry of the ESO-managed Secret "kiali" at
+# /kiali-override-secrets/login-token-signing-key/value.txt, which overrides the
+# placeholder reference string in the ConfigMap. ASM
+# usgov-coderdemo/observability/kiali-oauth carries both oidc-secret and
+# signing-key; ESO syncs both into the Secret "kiali"
+# (externalsecret-kiali-oauth.yaml).
+login_token:
+  signing_key: "secret:kiali:signing-key"
+
 auth:
   strategy: openid
   openid:
