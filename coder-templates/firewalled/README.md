@@ -115,8 +115,8 @@ Tail `/tmp/boundary_logs/` in another terminal to watch DENY events land.
 | Claude Code CLI | native install in `startup_script` | `curl -fsSL https://claude.ai/install.sh \| bash -s -- stable` into `~/.local/bin` |
 | Boundary (firewall) | native install in `startup_script` | `curl .../coder/boundary/main/install.sh \| bash`; standalone binary, no license/login dependency |
 | Boundary wrapper | generated in `startup_script` | `~/.local/bin/boundary-wrappers/claude`; jails `claude` under `landjail`; prepended to `PATH` in all shell rc files |
-| Claude Code config | `startup_script` + `locals.claude_settings` / `locals.claude_config` | `~/.claude/settings.json` (AI Gateway endpoint, onboarding flags); `~/.claude.json` (session-token `primaryApiKey`, project trust) |
-| AI auth | `coder_env.claude_api_key` + `coder_env.anthropic_auth_token` | `CLAUDE_API_KEY` and `ANTHROPIC_AUTH_TOKEN` = workspace owner session token |
+| Claude Code config | `startup_script` + `locals.claude_settings` / `locals.claude_config` | `~/.claude/settings.json` (AI Gateway endpoint, onboarding flags); `~/.claude.json` (project trust, onboarding flags) |
+| AI auth | `coder_env.anthropic_auth_token` | `ANTHROPIC_AUTH_TOKEN` = workspace owner session token (single credential) |
 | Firewall env | `coder_env.boundary_config` + `coder_env.boundary_jail_type` | `BOUNDARY_CONFIG` = allowlist path; `BOUNDARY_JAIL_TYPE=landjail` |
 | GitLab auth | `data.coder_external_auth.gitlab` | REQUIRED GitLab login; Coder's git credential helper injects the short-lived OAuth token; no PAT or SSH key in the workspace |
 | Browser IDE | `module.code_server` (`code-server` 1.3.1) | extra `coder_app` tile |
@@ -130,13 +130,16 @@ Parameters: `cpu`, `memory`, `disk_size`.
    every start:
    - `ANTHROPIC_BASE_URL = <access_url>/api/v2/aibridge/anthropic`
    - `ANTHROPIC_API_BASE` = same value (for clients that read that name)
-   - `CLAUDE_API_KEY` and `ANTHROPIC_AUTH_TOKEN` = workspace owner session
-     token (injected as sensitive `coder_env` resources, not baked into the
-     pod spec).
+   - `ANTHROPIC_AUTH_TOKEN` = workspace owner session token (injected as a
+     sensitive `coder_env` resource, not baked into the pod spec). This is
+     the single AI Gateway credential.
    - `~/.claude/settings.json` also sets `env.ANTHROPIC_BASE_URL` so Claude
      Code reads the gateway endpoint even from non-login shells.
-   - `~/.claude.json` carries `primaryApiKey` = session token; Claude Code
-     reads this on startup and does not prompt for an Anthropic key.
+   - `~/.claude.json` carries only onboarding and project-trust flags (no
+     `primaryApiKey`). Setting an API key / managed key there in addition to
+     `ANTHROPIC_AUTH_TOKEN` would make Claude Code warn about an auth
+     conflict (a bearer token and an API key set at once), so auth is left
+     to the env token alone.
 
    With `CODER_ACCESS_URL=https://dev.usgov.coderdemo.io` the base URL
    resolves to `https://dev.usgov.coderdemo.io/api/v2/aibridge/anthropic`.
@@ -301,7 +304,7 @@ pip install --dry-run requests              # expect success
 | boundary standalone install (`curl .../coder/boundary/main/install.sh \| bash`) | `main.tf` startup_script | verified |
 | boundary v0.9.0 does not auto-discover config; `--config` required | boundary changelog / `main.tf` comment | verified |
 | `BOUNDARY_CONFIG` + `BOUNDARY_JAIL_TYPE` env vars set via `coder_env` | `main.tf` `coder_env` resources | verified |
-| `CLAUDE_API_KEY` + `ANTHROPIC_AUTH_TOKEN` = session token (no raw Anthropic key) | `main.tf` `coder_env` resources | verified |
+| `ANTHROPIC_AUTH_TOKEN` = session token (single credential, no raw Anthropic key) | `main.tf` `coder_env` resource | verified |
 | `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_BASE` = AI Gateway endpoint | `main.tf` `coder_agent.main.env` | verified |
 | `~/.claude/settings.json` + `~/.claude.json` pre-seeded (onboarding skipped, session-token auth) | `main.tf` `locals.claude_settings` / `locals.claude_config` | verified |
 | `allow_privilege_escalation = true` required (boundary install.sh writes to `/usr/local/bin` via sudo) | `main.tf` pod security context | verified |

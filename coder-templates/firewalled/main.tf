@@ -230,15 +230,16 @@ locals {
     hasCompletedOnboarding       = true
   }
 
-  # Claude Code config, written to ~/.claude.json. Carries the AI Gateway
-  # auth key (the workspace owner's session token, NOT a raw Anthropic key)
-  # and per-project onboarding/trust state so the workspace dir is trusted
-  # on first launch.
+  # Claude Code config, written to ~/.claude.json. Carries per-project
+  # onboarding/trust state so the workspace dir is trusted on first launch.
+  # Auth is NOT set here: the AI Gateway credential is ANTHROPIC_AUTH_TOKEN
+  # (set via coder_env below). Setting a primaryApiKey here too would make
+  # Claude Code see both a bearer token and a "/login managed key" and warn
+  # about an auth conflict.
   claude_config = {
     autoUpdaterStatus            = "disabled"
     hasAcknowledgedCostThreshold = true
     hasCompletedOnboarding       = true
-    primaryApiKey                = data.coder_workspace_owner.me.session_token
     projects = {
       "/home/coder" = {
         hasCompletedProjectOnboarding = true
@@ -449,16 +450,12 @@ resource "coder_agent" "main" {
 # AI Gateway client auth
 # -----------------------------------------------------------------------------
 # Claude Code authenticates to the AI Gateway with the workspace owner's
-# session token (no raw Anthropic key in the workspace). CLAUDE_API_KEY is
-# the canonical env var the Claude Code CLI reads; ANTHROPIC_AUTH_TOKEN
-# matches the AI Gateway client contract in deploy/CONVENTIONS.md. Both carry
-# the same session token, so there is no conflict.
-resource "coder_env" "claude_api_key" {
-  agent_id = coder_agent.main.id
-  name     = "CLAUDE_API_KEY"
-  value    = data.coder_workspace_owner.me.session_token
-}
-
+# session token (no raw Anthropic key in the workspace). ANTHROPIC_AUTH_TOKEN
+# is the single credential, matching the AI Gateway client contract in
+# deploy/CONVENTIONS.md (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN). We do
+# NOT also set CLAUDE_API_KEY or a ~/.claude.json primaryApiKey: Claude Code
+# treats the env token as a bearer token and an API key / managed key as a
+# separate credential, and warns "Auth conflict" when both are present.
 resource "coder_env" "anthropic_auth_token" {
   agent_id = coder_agent.main.id
   name     = "ANTHROPIC_AUTH_TOKEN"
